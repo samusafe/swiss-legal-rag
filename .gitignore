@@ -1,0 +1,41 @@
+# Environment / secrets — never commit real env values
+.env
+.env.local
+.env.*.local
+
+# Downloaded corpus cache (official Fedlex XML) — re-fetchable, large
+data/
+
+# Private project notes — keep out of the public repo for now
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# ML / experiment tracking
+mlruns/
+mlartifacts/
+models/
+
+# Crash dumps (Git Bash / Cygwin)
+*.stackdump
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

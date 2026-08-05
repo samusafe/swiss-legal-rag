@@ -33,6 +33,9 @@ models/
 # Crash dumps (Git Bash / Cygwin)
 *.stackdump
 
+# Agent workflow scratch (progress ledgers)
+.superpowers/
+
 # OS / editor
 .DS_Store
 Thumbs.db

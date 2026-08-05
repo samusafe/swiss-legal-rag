@@ -40,6 +40,7 @@ App-level commands live in each `apps/*/README.md` once implemented.
 - Python: type hints everywhere, `pydantic` models at boundaries. TypeScript: `strict`, no `any`.
 - Errors: fail loud with context; never swallow exceptions.
 - Every generated answer must cite `[SR <nr> Art. <x>]` — un-cited claims are defects (see spec §5).
+- **Docs are a deliverable:** update the root README and per-app READMEs with every user-facing change; professional tone (public open-source repo). `docs/` is git-ignored internal planning — never reference it from public docs.
 
 ## Model routing
 

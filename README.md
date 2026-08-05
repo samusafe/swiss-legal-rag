@@ -48,7 +48,7 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 | ------------------------------------------ | ----- |
 | 0 — Repo scaffold, Docker Compose, README  | ✅    |
 | 1 — SPARQL resolve + fetch (10-act corpus) | ✅    |
-| 2 — Akoma Ntoso parser → article chunks    | ⬜    |
+| 2 — Akoma Ntoso parser → article chunks    | ✅    |
 | 3 — Embed + index + hybrid search + rerank | ⬜    |
 | 4 — `/chat` with citation contract + SSE   | ⬜    |
 | 5 — Tauri desktop UI                       | ⬜    |

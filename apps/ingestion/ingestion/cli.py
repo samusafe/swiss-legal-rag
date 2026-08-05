@@ -8,6 +8,7 @@ import httpx
 from ingestion.corpus import load_corpus
 from ingestion.fetch import fetch_all
 from ingestion.models import Manifest
+from ingestion.parse import parse_all
 from ingestion.resolve import resolve_corpus
 
 
@@ -40,6 +41,9 @@ def main(argv: list[str] | None = None) -> None:
     subparsers.add_parser(
         "fetch", parents=[common], help="download Akoma Ntoso XML per manifest.json"
     )
+    subparsers.add_parser(
+        "parse", parents=[common], help="parse raw Akoma Ntoso XML into article chunk JSONL files"
+    )
     args = parser.parse_args(argv)
 
     manifest_path = args.data_dir / "manifest.json"
@@ -54,6 +58,13 @@ def main(argv: list[str] | None = None) -> None:
             downloaded = fetch_all(manifest, client, args.data_dir / "raw", sleep=time.sleep)
             skipped = len(manifest.entries) - len(downloaded)
             print(f"downloaded {len(downloaded)} files, {skipped} cached")
+        elif args.command == "parse":
+            manifest = Manifest.load(manifest_path)
+            counts = parse_all(manifest, args.data_dir / "raw", args.data_dir / "chunks")
+            print(
+                f"parsed {sum(counts.values())} chunks from {len(counts)} act-language files "
+                f"-> {args.data_dir / 'chunks'}"
+            )
 
 
 if __name__ == "__main__":

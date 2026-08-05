@@ -16,6 +16,7 @@ pip install -e ".[dev]"
 ```
 ingest resolve    # corpus.yaml -> data/manifest.json (current versions via SPARQL)
 ingest fetch      # manifest -> data/raw/<sr>/<lang>.xml (cached, ~1 req/s)
+ingest parse      # manifest + raw XML -> data/chunks/<sr>/<lang>.jsonl (1 line = 1 article chunk)
 ```
 
 ## Tests
@@ -24,8 +25,9 @@ Run from `apps/ingestion`:
 
 ```
 cd apps/ingestion
-pytest            # unit tests (offline, mocked HTTP)
+pytest            # unit tests (offline; corpus integration auto-skips without data/raw)
 pytest -m live    # opt-in smoke test against the real Fedlex endpoint
+pytest -m corpus  # only the corpus integration test
 ```
 
-Parsing and embedding are not implemented yet — see the roadmap in the root README.
+Embedding is not implemented yet — see the roadmap in the root README.

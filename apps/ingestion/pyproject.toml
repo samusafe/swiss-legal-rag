@@ -7,6 +7,7 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "PyYAML>=6.0",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -24,5 +25,8 @@ include = ["ingestion*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: hits the real Fedlex endpoint (excluded by default)"]
+markers = [
+    "live: hits the real Fedlex endpoint (excluded by default)",
+    "corpus: needs the local data/raw corpus cache (auto-skipped when absent)",
+]
 addopts = "-m 'not live'"

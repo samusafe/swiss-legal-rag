@@ -24,3 +24,16 @@ class Manifest(BaseModel):
     @classmethod
     def load(cls, path: Path) -> "Manifest":
         return cls.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+class Chunk(BaseModel):
+    sr: str
+    lang: str
+    article: str
+    part: int | None = None
+    heading: str | None
+    text: str
+    eli: str
+    act_name: str
+    abbrev: str
+    version_date: date

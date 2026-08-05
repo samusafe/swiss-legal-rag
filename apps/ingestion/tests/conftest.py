@@ -46,3 +46,14 @@ def sparql_client(canned_rows) -> httpx.Client:
         return httpx.Response(200, json=sparql_response(canned_rows))
 
     return make_client(handler)
+
+
+AKN_NS = "http://docs.oasis-open.org/legaldocml/ns/akn/3.0"
+FEDLEX_NS = "http://fedlex.admin.ch/"
+
+
+def akn_doc(body_xml: str) -> bytes:
+    return (
+        f'<akomaNtoso xmlns="{AKN_NS}" xmlns:fedlex="{FEDLEX_NS}">'
+        f"<act><body>{body_xml}</body></act></akomaNtoso>"
+    ).encode()

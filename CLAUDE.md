@@ -14,7 +14,7 @@ Multilingual RAG over Swiss federal law (DE/FR/IT). Fully local, zero-cost, publ
 ## Layout
 
 ```
-apps/web/        Next.js chat UI (calls retrieval API, never Postgres directly)
+apps/desktop/    Tauri 2 + Vite + React chat UI (calls retrieval API, never Postgres directly)
 apps/retrieval/  FastAPI — /search (hybrid + rerank), /chat (RAG + SSE)
 apps/ingestion/  Python CLI — resolve → fetch → parse → embed (per corpus.yaml)
 db/init/         SQL run on first Postgres boot (pgvector extension)
@@ -41,8 +41,19 @@ App-level commands live in each `apps/*/README.md` once implemented.
 - Errors: fail loud with context; never swallow exceptions.
 - Every generated answer must cite `[SR <nr> Art. <x>]` — un-cited claims are defects (see spec §5).
 
+## Model routing
+
+- Main thread (session model): architecture, spec changes, Akoma Ntoso parsing logic, retrieval/eval design — the judgment-heavy work.
+- Subagents on cheaper models: `haiku` for mechanical sweeps (renames, doc sync, boilerplate, broad searches); `sonnet` for standard implementation and single-pass code review.
+- `opus` subagents for hard delegated work where `sonnet` falls short: Akoma Ntoso parser edge cases, hybrid-search/RRF tuning, adversarial review before closing a milestone.
+- One review pass per change; don't stack multiple review agents on small diffs.
+- Verify before claiming done: run the relevant check (`pytest`, `cargo check`, `tsc`) instead of a re-read.
+
 ## Token discipline
 
 - Read `docs/swiss-legal-rag.md` by section (offset/limit), not whole-file, once you know the spec.
 - Prefer Glob/Grep over directory listings; read only files you will edit.
+- `data/raw/` XML files are huge — never read whole; Grep the target `eId`/article and read a narrow window around it.
+- Never read `node_modules/`, `src-tauri/target/`, `.venv/`, or `data/raw/` listings into context.
+- Broad multi-file searches go to an Explore subagent; keep main context for decisions.
 - Keep this file and per-app READMEs short — link to the spec instead of duplicating it.

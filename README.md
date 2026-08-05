@@ -14,7 +14,7 @@ Swiss federal law is published in three official languages, and the binding vers
 
 ```
 apps/
-├── web/          Next.js chat UI — citations as chips linking to Fedlex
+├── desktop/      Tauri 2 + React chat UI — citations as chips linking to Fedlex
 ├── retrieval/    FastAPI — hybrid search (pgvector + Postgres FTS, RRF) → cross-encoder rerank → RAG with SSE
 └── ingestion/    Python CLI — Fedlex SPARQL → Akoma Ntoso XML → 1 article = 1 chunk → embed → index
 db/init/          pgvector bootstrap SQL
@@ -28,7 +28,7 @@ corpus.yaml       The corpus manifest: ~10 federal acts × 3 languages
 
 ## Quick start
 
-Prerequisites: Docker, [Ollama](https://ollama.com), Python 3.12+, Node 20+.
+Prerequisites: Docker, [Ollama](https://ollama.com), Python 3.12+, Node 20+, Rust (desktop app only).
 
 ```bash
 cp .env.example .env      # adjust if needed — no secrets required
@@ -44,18 +44,16 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 
 ## Status
 
-| Milestone | State |
-| --- | --- |
-| 0 — Repo scaffold, Docker Compose, README | ✅ |
-| 1 — SPARQL resolve + fetch (10-act corpus) | ⬜ |
-| 2 — Akoma Ntoso parser → article chunks | ⬜ |
-| 3 — Embed + index + hybrid search + rerank | ⬜ |
-| 4 — `/chat` with citation contract + SSE | ⬜ |
-| 5 — Next.js UI | ⬜ |
-| 6 — Gold dataset + eval scorecard | ⬜ |
-| 7 — Polish (diagram, GIF, demo) | ⬜ |
-
-Full spec: [docs/swiss-legal-rag.md](docs/swiss-legal-rag.md).
+| Milestone                                  | State |
+| ------------------------------------------ | ----- |
+| 0 — Repo scaffold, Docker Compose, README  | ✅    |
+| 1 — SPARQL resolve + fetch (10-act corpus) | ⬜    |
+| 2 — Akoma Ntoso parser → article chunks    | ⬜    |
+| 3 — Embed + index + hybrid search + rerank | ⬜    |
+| 4 — `/chat` with citation contract + SSE   | ⬜    |
+| 5 — Tauri desktop UI                       | ⬜    |
+| 6 — Gold dataset + eval scorecard          | ⬜    |
+| 7 — Polish (diagram, GIF, demo)            | ⬜    |
 
 ## License
 

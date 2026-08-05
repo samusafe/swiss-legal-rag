@@ -1,4 +1,5 @@
 import re
+from collections import Counter
 from pathlib import Path
 
 from lxml import etree
@@ -9,6 +10,7 @@ AKN_NS = "http://docs.oasis-open.org/legaldocml/ns/akn/3.0"
 FEDLEX_NS = "http://fedlex.admin.ch/"
 
 _ARTICLE_EID_RE = re.compile(r"^art_(.+)$")
+_ARTICLE_NUMBER_RE = re.compile(r"^(\d+)([a-z]+)?$")
 
 
 def _norm(text: str) -> str:
@@ -25,6 +27,16 @@ def article_number(eid: str) -> str:
     if match is None:
         raise RuntimeError(f"unrecognized article eId: {eid}")
     return match.group(1).replace("_", "")
+
+
+def _anchor_from_article(article: str) -> str:
+    # Inverse of article_number, used only to synthesize a fresh eId anchor when a
+    # duplicate source eId forces disambiguation (see parse_act).
+    match = _ARTICLE_NUMBER_RE.match(article)
+    if match is None:
+        raise RuntimeError(f"cannot build eId anchor from article number: {article}")
+    digits, letters = match.groups()
+    return f"art_{digits}_{letters}" if letters else f"art_{digits}"
 
 
 def article_text(article: etree._Element) -> str:
@@ -134,4 +146,48 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
             )
     if not chunks:
         raise RuntimeError(f"no chunks produced for SR {entry.sr} ({entry.lang}): every article was empty or repealed")
+    chunks = _disambiguate_duplicate_keys(chunks, entry)
     return chunks
+
+
+def _disambiguate_duplicate_keys(chunks: list[Chunk], entry: ManifestEntry) -> list[Chunk]:
+    # Fedlex XML has real duplicate source eIds (e.g. two <article eId="art_221"> in
+    # SR 220 FR — one for Art. 220, one for Art. 221). Both chunks then share the same
+    # (eli, part) key. Within a colliding group, the chunk whose article number
+    # agrees with the eId keeps the original eId anchor (it's what resolves on
+    # fedlex.admin.ch, so it's preferred whenever unique); the mislabeled one gets a
+    # synthesized anchor built from its true article number instead. A single rewrite
+    # can itself land on an anchor already used by an untouched singleton (SR 220 FR
+    # is a 3-way chain: art_220 alone holds Art. 219's text via a plain header
+    # override, while art_221 is duplicated between Art. 220 and Art. 221 — rehoming
+    # Art. 220 onto "#art_220" collides with that untouched Art. 219 chunk). So this
+    # loops to a fixed point: each pass only touches chunks currently in a colliding
+    # group, which lets newly-created collisions cascade to resolution (Art. 219 then
+    # moves to its own "#art_219", freeing "#art_220" for Art. 220) without touching
+    # any mismatched chunk that was never actually colliding with anything.
+    resolved = list(chunks)
+    for _ in range(len(chunks) + 1):  # generous bound; real corpus converges in 2 passes
+        key_counts = Counter((c.eli, c.part or 0) for c in resolved)
+        changed = False
+        next_resolved: list[Chunk] = []
+        for chunk in resolved:
+            key = (chunk.eli, chunk.part or 0)
+            if key_counts[key] > 1 and chunk.article != article_number(chunk.eid):
+                new_eli = f"{entry.eli}#{_anchor_from_article(chunk.article)}"
+                if new_eli != chunk.eli:
+                    chunk = chunk.model_copy(update={"eli": new_eli})
+                    changed = True
+            next_resolved.append(chunk)
+        resolved = next_resolved
+        if not changed:
+            break
+
+    final_counts = Counter((chunk.eli, chunk.part or 0) for chunk in resolved)
+    for key, count in final_counts.items():
+        if count > 1:
+            articles = [c.article for c in resolved if (c.eli, c.part or 0) == key]
+            raise RuntimeError(
+                f"duplicate chunk key survived eId disambiguation for SR {entry.sr} "
+                f"({entry.lang}): eli={key[0]} part={key[1]} articles={articles}"
+            )
+    return resolved

@@ -141,6 +141,49 @@ def test_parse_act_prefers_header_number_over_duplicate_eid(tmp_path: Path) -> N
     assert chunks[0].eli.endswith("#art_221")
 
 
+def test_parse_act_disambiguates_duplicate_eid(tmp_path: Path) -> None:
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_221"><num>Art. 221</num>'
+        '<paragraph eId="art_221/para"><content><p>Text 221.</p></content></paragraph></article>'
+        '<article eId="art_221"><num>Art. 220</num>'
+        '<paragraph eId="art_221/para2"><content><p>Text 220.</p></content></paragraph></article>'
+    )
+    chunks = parse_act(xml_path, entry_for())
+    assert len(chunks) == 2
+    by_article = {c.article: c for c in chunks}
+    assert set(by_article) == {"220", "221"}
+    assert by_article["221"].eli.endswith("#art_221")
+    assert by_article["220"].eli.endswith("#art_220")
+    assert by_article["221"].eli != by_article["220"].eli
+    assert by_article["221"].eid == "art_221"
+    assert by_article["220"].eid == "art_221"
+
+
+def test_parse_act_disambiguates_cascading_chain(tmp_path: Path) -> None:
+    # Offline regression net for the fixed-point iteration in
+    # _disambiguate_duplicate_keys: a singleton (art_220, mislabeled as Art. 219)
+    # is untouched in pass 1, then pulled into pass 2 once the duplicate-pair
+    # rewrite lands on its anchor. A single-pass implementation leaves Art. 219
+    # and the rebuilt Art. 220 both on "#art_220" and never resolves this.
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_220"><num>Art. 219</num>'
+        '<paragraph eId="art_220/para"><content><p>Text 219.</p></content></paragraph></article>'
+        '<article eId="art_221"><num>Art. 221</num>'
+        '<paragraph eId="art_221/para"><content><p>Text 221.</p></content></paragraph></article>'
+        '<article eId="art_221"><num>Art. 220</num>'
+        '<paragraph eId="art_221/para2"><content><p>Text 220.</p></content></paragraph></article>'
+    )
+    chunks = parse_act(xml_path, entry_for())
+    assert len(chunks) == 3
+    by_article = {c.article: c for c in chunks}
+    assert set(by_article) == {"219", "220", "221"}
+    elis = {c.eli for c in chunks}
+    assert len(elis) == 3
+    assert by_article["221"].eli.endswith("#art_221")
+    assert by_article["220"].eli.endswith("#art_220")
+    assert by_article["219"].eli.endswith("#art_219")
+
+
 def test_parse_act_splits_oversized_articles(tmp_path: Path) -> None:
     long_sentence = "Wort " * 500  # ~2500 chars per paragraph
     paras = "".join(

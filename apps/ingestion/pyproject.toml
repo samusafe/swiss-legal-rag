@@ -8,6 +8,9 @@ dependencies = [
     "pydantic>=2.7",
     "PyYAML>=6.0",
     "lxml>=5.0",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -28,5 +31,6 @@ testpaths = ["tests"]
 markers = [
     "live: hits the real Fedlex endpoint (excluded by default)",
     "corpus: needs the local data/raw corpus cache (auto-skipped when absent)",
+    "db: needs the local Postgres from docker compose (auto-skipped when unreachable)",
 ]
 addopts = "-m 'not live'"

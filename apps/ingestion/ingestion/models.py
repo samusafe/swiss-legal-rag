@@ -30,8 +30,10 @@ class Chunk(BaseModel):
     sr: str
     lang: str
     article: str
+    eid: str
     part: int | None = None
     heading: str | None
+    context: str | None = None
     text: str
     eli: str
     act_name: str

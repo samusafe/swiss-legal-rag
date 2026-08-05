@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 
 from ingestion.corpus import load_corpus
+from ingestion.embed import run_embed
 from ingestion.fetch import fetch_all
 from ingestion.models import Manifest
 from ingestion.parse import parse_all
@@ -44,27 +45,34 @@ def main(argv: list[str] | None = None) -> None:
     subparsers.add_parser(
         "parse", parents=[common], help="parse raw Akoma Ntoso XML into article chunk JSONL files"
     )
+    subparsers.add_parser(
+        "embed", parents=[common], help="embed chunks into Postgres/pgvector via Ollama"
+    )
     args = parser.parse_args(argv)
 
     manifest_path = args.data_dir / "manifest.json"
-    with _make_client() as client:
-        if args.command == "resolve":
-            corpus = load_corpus(args.corpus)
-            manifest = resolve_corpus(corpus, client, today=date.today(), sleep=time.sleep)
-            manifest.save(manifest_path)
-            print(f"resolved {len(manifest.entries)} act-language versions -> {manifest_path}")
-        elif args.command == "fetch":
-            manifest = Manifest.load(manifest_path)
-            downloaded = fetch_all(manifest, client, args.data_dir / "raw", sleep=time.sleep)
-            skipped = len(manifest.entries) - len(downloaded)
-            print(f"downloaded {len(downloaded)} files, {skipped} cached")
-        elif args.command == "parse":
-            manifest = Manifest.load(manifest_path)
-            counts = parse_all(manifest, args.data_dir / "raw", args.data_dir / "chunks")
-            print(
-                f"parsed {sum(counts.values())} chunks from {len(counts)} act-language files "
-                f"-> {args.data_dir / 'chunks'}"
-            )
+
+    if args.command == "resolve" or args.command == "fetch":
+        with _make_client() as client:
+            if args.command == "resolve":
+                corpus = load_corpus(args.corpus)
+                manifest = resolve_corpus(corpus, client, today=date.today(), sleep=time.sleep)
+                manifest.save(manifest_path)
+                print(f"resolved {len(manifest.entries)} act-language versions -> {manifest_path}")
+            elif args.command == "fetch":
+                manifest = Manifest.load(manifest_path)
+                downloaded = fetch_all(manifest, client, args.data_dir / "raw", sleep=time.sleep)
+                skipped = len(manifest.entries) - len(downloaded)
+                print(f"downloaded {len(downloaded)} files, {skipped} cached")
+    elif args.command == "parse":
+        manifest = Manifest.load(manifest_path)
+        counts = parse_all(manifest, args.data_dir / "raw", args.data_dir / "chunks")
+        print(
+            f"parsed {sum(counts.values())} chunks from {len(counts)} act-language files "
+            f"-> {args.data_dir / 'chunks'}"
+        )
+    elif args.command == "embed":
+        run_embed(args.data_dir)
 
 
 if __name__ == "__main__":

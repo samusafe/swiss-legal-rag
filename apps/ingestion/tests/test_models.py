@@ -32,6 +32,7 @@ def test_chunk_json_roundtrip() -> None:
         sr="220",
         lang="de",
         article="335c",
+        eid="art_335_c",
         heading="Kündigungsfristen",
         text="Art. 335c\n1 Beispieltext.",
         eli="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
@@ -40,6 +41,7 @@ def test_chunk_json_roundtrip() -> None:
         version_date=date(2026, 1, 1),
     )
     assert chunk.part is None
+    assert chunk.context is None
     data = chunk.model_dump_json()
     assert '"article":"335c"' in data.replace(" ", "")
     assert Chunk.model_validate_json(data) == chunk

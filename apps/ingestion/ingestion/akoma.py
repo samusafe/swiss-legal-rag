@@ -15,6 +15,9 @@ def _norm(text: str) -> str:
     return " ".join(text.split())
 
 
+_REPEAL_ONLY_RE = re.compile(r"^(aufgehoben|abrogat[oiae]|abrog[ée]{1,2}s?)\.?$", re.IGNORECASE)
+
+
 def article_number(eid: str) -> str:
     # Annex articles carry a path prefix ("anx_1/art_2") — number is the last segment.
     last = eid.rsplit("/", 1)[-1]
@@ -50,6 +53,18 @@ def marginal_heading(article: etree._Element) -> str | None:
             if heading is not None:
                 return _norm("".join(heading.itertext()))
     return None
+
+
+def marginal_breadcrumb(article: etree._Element) -> str | None:
+    headings: list[str] = []
+    for ancestor in article.iterancestors(f"{{{AKN_NS}}}level"):
+        if ancestor.get(f"{{{FEDLEX_NS}}}role") == "marginal":
+            heading = ancestor.find(f"{{{AKN_NS}}}heading")
+            if heading is not None:
+                headings.append(_norm("".join(heading.itertext())))
+    if not headings:
+        return None
+    return " › ".join(reversed(headings))
 
 
 MAX_CHUNK_CHARS = 8000
@@ -88,7 +103,8 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
         text = article_text(article)
         header, _, body = text.partition("\n")
         # Repealed/not-yet-in-force articles have empty bodies after footnote stripping.
-        if not body.strip():
+        # Also skip repeal-stub bodies (e.g., "Aufgehoben", "Abrogés").
+        if not body.strip() or _REPEAL_ONLY_RE.match(body.strip()):
             continue
         number = article_number(eid)
         # SR 220 FR has duplicate source eIds (e.g. two <article eId="art_221">) where
@@ -98,14 +114,17 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
         if _HEADER_NUMBER_RE.match(header_number) and header_number != number:
             number = header_number
         heading = marginal_heading(article)
+        context = marginal_breadcrumb(article)
         for part, part_text in _split_oversized(text):
             chunks.append(
                 Chunk(
                     sr=entry.sr,
                     lang=entry.lang,
                     article=number,
+                    eid=eid,
                     part=part,
                     heading=heading,
+                    context=context,
                     text=part_text,
                     eli=f"{entry.eli}#{eid}",
                     act_name=entry.act_name,
@@ -113,4 +132,6 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
                     version_date=entry.version_date,
                 )
             )
+    if not chunks:
+        raise RuntimeError(f"no chunks produced for SR {entry.sr} ({entry.lang}): every article was empty or repealed")
     return chunks

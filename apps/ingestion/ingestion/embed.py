@@ -1,0 +1,162 @@
+import os
+from pathlib import Path
+
+import httpx
+import psycopg
+from dotenv import load_dotenv
+from pgvector.psycopg import register_vector
+
+from ingestion.models import Chunk
+
+# Retrieval (apps/retrieval) reads this table; ingestion owns schema and writes.
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS chunks (
+    id           bigserial PRIMARY KEY,
+    eli          text NOT NULL,
+    part         integer NOT NULL DEFAULT 0,
+    sr           text NOT NULL,
+    lang         text NOT NULL,
+    article      text NOT NULL,
+    eid          text NOT NULL,
+    heading      text,
+    context      text,
+    act_name     text NOT NULL,
+    abbrev       text NOT NULL,
+    version_date date NOT NULL,
+    text         text NOT NULL,
+    embedding    vector(1024),
+    tsv          tsvector,
+    UNIQUE (eli, part)
+);
+CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv);
+"""
+
+_TS_CONFIGS = {"de": "german", "fr": "french", "it": "italian"}
+
+_UPSERT_SQL = """
+INSERT INTO chunks (eli, part, sr, lang, article, eid, heading, context,
+                    act_name, abbrev, version_date, text, tsv)
+VALUES (%(eli)s, %(part)s, %(sr)s, %(lang)s, %(article)s, %(eid)s, %(heading)s, %(context)s,
+        %(act_name)s, %(abbrev)s, %(version_date)s, %(text)s,
+        to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s))
+ON CONFLICT (eli, part) DO UPDATE SET
+    sr = EXCLUDED.sr, lang = EXCLUDED.lang, article = EXCLUDED.article, eid = EXCLUDED.eid,
+    heading = EXCLUDED.heading, context = EXCLUDED.context, act_name = EXCLUDED.act_name,
+    abbrev = EXCLUDED.abbrev, version_date = EXCLUDED.version_date,
+    text = EXCLUDED.text, tsv = EXCLUDED.tsv,
+    embedding = CASE WHEN chunks.text = EXCLUDED.text THEN chunks.embedding ELSE NULL END
+"""
+
+
+def ts_config(lang: str) -> str:
+    config = _TS_CONFIGS.get(lang)
+    if config is None:
+        raise RuntimeError(f"no text-search config for language: {lang}")
+    return config
+
+
+def embedding_input(chunk: Chunk) -> str:
+    prefix = f"{chunk.act_name} ({chunk.abbrev})"
+    if chunk.context:
+        prefix = f"{prefix} — {chunk.context}"
+    return f"{prefix}\n{chunk.text}"
+
+
+def embed_texts(
+    client: httpx.Client, base_url: str, model: str, texts: list[str]
+) -> list[list[float]]:
+    response = client.post(f"{base_url}/api/embed", json={"model": model, "input": texts})
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Ollama embed failed (HTTP {response.status_code}) — is `ollama serve` "
+            f"running at {base_url} and `{model}` pulled?"
+        )
+    return response.json()["embeddings"]
+
+
+def load_chunks(chunks_dir: Path) -> list[Chunk]:
+    files = sorted(chunks_dir.glob("*/*.jsonl"))
+    if not files:
+        raise RuntimeError(f"no chunk files under {chunks_dir} — run `ingest parse` first")
+    chunks: list[Chunk] = []
+    for file in files:
+        for line in file.read_text(encoding="utf-8").splitlines():
+            chunks.append(Chunk.model_validate_json(line))
+    _check_no_duplicate_keys(chunks)
+    return chunks
+
+
+def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
+    # ON CONFLICT (eli, part) DO UPDATE silently drops one chunk per collision
+    # (last write wins) — fail loud instead. Disambiguation is deferred to M4.
+    seen: dict[tuple[str, int], Chunk] = {}
+    for chunk in chunks:
+        key = (chunk.eli, chunk.part or 0)
+        prior = seen.get(key)
+        if prior is not None:
+            raise RuntimeError(
+                f"duplicate chunk key (eli={chunk.eli}, part={key[1]}): "
+                f"SR {chunk.sr} {chunk.lang} articles {prior.article} and {chunk.article} "
+                "— duplicate source eId in Fedlex XML"
+            )
+        seen[key] = chunk
+
+
+def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
+    with conn.cursor() as cur:
+        for chunk in chunks:
+            params = chunk.model_dump()
+            params["part"] = chunk.part or 0
+            params["ts_config"] = ts_config(chunk.lang)
+            cur.execute(_UPSERT_SQL, params)
+    conn.commit()
+
+
+def embed_pending(
+    conn: psycopg.Connection,
+    client: httpx.Client,
+    base_url: str,
+    model: str,
+    batch_size: int = 16,
+) -> int:
+    rows = conn.execute(
+        "SELECT id, act_name, abbrev, context, text FROM chunks WHERE embedding IS NULL ORDER BY id"
+    ).fetchall()
+    done = 0
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        texts = [
+            embedding_input(
+                Chunk.model_construct(act_name=r[1], abbrev=r[2], context=r[3], text=r[4])
+            )
+            for r in batch
+        ]
+        vectors = embed_texts(client, base_url, model, texts)
+        with conn.cursor() as cur:
+            for row, vector in zip(batch, vectors, strict=True):
+                cur.execute("UPDATE chunks SET embedding = %s WHERE id = %s", (vector, row[0]))
+        conn.commit()  # per-batch commit keeps the run resumable after interruption
+        done += len(batch)
+        print(f"embedded {done}/{len(rows)}", flush=True)
+    return done
+
+
+def run_embed(data_dir: Path) -> None:
+    load_dotenv()  # repo-root .env, same names as .env.example
+    database_url = os.environ.get(
+        "DATABASE_URL", "postgresql://rag:rag-local-only@localhost:5432/swiss_legal_rag"
+    )
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    model = os.environ.get("EMBEDDING_MODEL", "bge-m3")
+    chunks = load_chunks(data_dir / "chunks")
+    with psycopg.connect(database_url) as conn:
+        conn.execute(SCHEMA_SQL)
+        conn.commit()
+        register_vector(conn)
+        upsert_chunks(conn, chunks)
+        print(f"upserted {len(chunks)} chunks", flush=True)
+        with httpx.Client(timeout=300.0) as client:
+            done = embed_pending(conn, client, base_url, model)
+        remaining = conn.execute("SELECT count(*) FROM chunks WHERE embedding IS NULL").fetchone()
+        print(f"embedded {done} new vectors; {remaining[0]} still pending", flush=True)

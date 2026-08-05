@@ -164,3 +164,36 @@ def test_parse_act_fails_loud_on_empty_body(tmp_path: Path) -> None:
 def test_parse_act_fails_loud_on_missing_file(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="missing"):
         parse_act(tmp_path / "nope.xml", entry_for())
+
+
+def test_parse_act_skips_repeal_stub_bodies(tmp_path: Path) -> None:
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_732_a"><num>Art. 732a</num>'
+        '<paragraph eId="art_732_a/para"><content><p>Aufgehoben</p></content></paragraph></article>'
+        '<article eId="art_733"><num>Art. 733</num>'
+        '<paragraph eId="art_733/para"><content><p>Weiterhin geltender Inhalt.</p></content></paragraph></article>'
+    )
+    assert [c.article for c in parse_act(xml_path, entry_for())] == ["733"]
+
+
+def test_parse_act_skips_plural_repeal_stubs(tmp_path: Path) -> None:
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_150"><num>Art. 150 à 158</num>'
+        '<paragraph eId="art_150/para"><content><p>Abrogés</p></content></paragraph></article>'
+    )
+    with pytest.raises(RuntimeError, match="no chunks"):
+        parse_act(xml_path, entry_for("fr"))
+
+
+def test_chunk_carries_eid_and_breadcrumb(tmp_path: Path) -> None:
+    xml_path = write_doc(tmp_path,
+        '<level eId="lvl_A" fedlex:role="marginal"><heading>Beendigung</heading>'
+        '<level eId="lvl_A/lvl_1" fedlex:role="marginal"><heading>Kündigungsfristen</heading>'
+        '<article eId="art_335_c"><num>Art. 335c</num>'
+        '<paragraph eId="art_335_c/para"><content><p>Inhalt.</p></content></paragraph>'
+        "</article></level></level>"
+    )
+    chunk = parse_act(xml_path, entry_for())[0]
+    assert chunk.eid == "art_335_c"
+    assert chunk.context == "Beendigung › Kündigungsfristen"
+    assert chunk.heading == "Kündigungsfristen"

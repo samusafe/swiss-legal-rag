@@ -74,24 +74,31 @@ def test_search_returns_503_when_db_unavailable() -> None:
     assert "database unavailable" in response.json()["detail"]
 
 
-def test_search_drops_deps_after_db_error_so_next_request_reconnects() -> None:
+def test_search_reconnects_and_recovers_on_next_request(monkeypatch) -> None:
     def failing_dense(vector: list[float], k: int) -> list:
         raise psycopg.OperationalError("connection refused")
 
-    deps = SearchDeps(
+    dead = SearchDeps(
         embed=lambda text: [0.0] * 1024,
         dense=failing_dense,
         fts=lambda q, lang, k: [],
         rerank=lambda q, texts: [],
     )
     app = create_app()
-    app.state.deps = deps
+    app.state.deps = dead
+
+    def fake_connect(app_) -> None:
+        app_.state.deps = deps_with([])
+
+    monkeypatch.setattr("retrieval.app._connect_deps", fake_connect)
     with TestClient(app) as client:
-        response = client.post("/search", json={"q": "frage", "lang": "de"})
-        assert response.status_code == 503
-        # deps dropped: the next request rebuilds (and reconnects) instead of
-        # reusing a dead connection forever.
-        assert app.state.deps is None
+        first = client.post("/search", json={"q": "frage", "lang": "de"})
+        assert first.status_code == 503
+        assert app.state.deps is None  # dropped, so the next request rebuilds
+        second = client.post("/search", json={"q": "frage", "lang": "de"})
+
+    assert second.status_code == 200
+    assert [r["article"] for r in second.json()["results"]] == ["3", "2", "1"]
 
 
 def _parse_sse(body: str) -> list[tuple[str, dict]]:
@@ -171,3 +178,18 @@ def test_chat_rejects_unsupported_lang() -> None:
         response = client.post("/chat", json={"question": "frage", "lang": "en"})
 
     assert response.status_code == 422
+
+
+def test_chat_reuses_lazy_httpx_client_across_requests(monkeypatch) -> None:
+    def fake_stream(client, base_url, model, messages):
+        yield "ok"
+
+    monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        assert client.post("/chat", json={"question": "frage", "lang": "de"}).status_code == 200
+        first_client = app.state.client
+        assert first_client is not None
+        assert client.post("/chat", json={"question": "frage", "lang": "de"}).status_code == 200
+        assert app.state.client is first_client

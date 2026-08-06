@@ -33,7 +33,7 @@ Linux/macOS:
 .venv/bin/python -m uvicorn retrieval.app:app --port 8000
 ```
 
-The reranker model loads lazily on the first request to `/search`, so expect that first call to take ~30 s; subsequent calls are fast.
+The reranker model loads lazily on the first request to `/search` or `/chat`, so expect that first call to take ~30 s; subsequent calls are fast.
 
 ## API
 
@@ -120,6 +120,8 @@ The response is `text/event-stream` with four event types, in order:
 | `token`  | once per generated token/delta | `{ "delta": "<text fragment>" }`                                |
 | `done`   | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
 | `error`  | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
+
+`duration_ms` covers generation only — retrieval (embed, search, rerank) runs before the stream starts and is not included.
 
 Example stream (abridged):
 

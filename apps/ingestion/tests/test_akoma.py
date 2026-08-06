@@ -284,3 +284,22 @@ def test_chunk_carries_eid_and_breadcrumb(tmp_path: Path) -> None:
     assert chunk.eid == "art_335_c"
     assert chunk.context == "Beendigung › Kündigungsfristen"
     assert chunk.heading == "Kündigungsfristen"
+
+
+def test_parse_act_repealed_element_still_owns_its_eid(tmp_path: Path) -> None:
+    # eid ownership must be recorded BEFORE the repealed-skip: the repealed element
+    # <article eId="art_3"> (whose header says Art. 4) still owns "#art_3", so a
+    # duplicate-key chunk for Art. 3 may not synthesize that anchor and must fall
+    # back to the act-level ELI instead of pointing at another article's element.
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_3"><num>Art. 4</num></article>'
+        '<article eId="art_2"><num>Art. 2</num>'
+        '<paragraph eId="art_2/para"><content><p>Text zwei.</p></content></paragraph></article>'
+        '<article eId="art_2"><num>Art. 3</num>'
+        '<paragraph eId="art_2/para2"><content><p>Text drei.</p></content></paragraph></article>'
+    )
+    chunks = parse_act(xml_path, entry_for())
+    by_article = {c.article: c for c in chunks}
+    assert set(by_article) == {"2", "3"}
+    assert by_article["2"].eli.endswith("#art_2")
+    assert by_article["3"].eli == entry_for().eli

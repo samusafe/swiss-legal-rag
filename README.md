@@ -14,7 +14,7 @@ Swiss federal law is published in three official languages, and the binding vers
 
 ```
 apps/
-├── desktop/      Tauri 2 + React chat UI — citations as chips linking to Fedlex
+├── desktop/      Tauri 2 + React chat UI — SSE streaming, citation chips to Fedlex, DE/FR/IT
 ├── retrieval/    FastAPI — hybrid search (pgvector + Postgres FTS, RRF) → cross-encoder rerank → RAG with SSE
 └── ingestion/    Python CLI — Fedlex SPARQL → Akoma Ntoso XML → 1 article = 1 chunk → embed → index
 db/init/          pgvector bootstrap SQL
@@ -51,7 +51,7 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 | 2 — Akoma Ntoso parser → article chunks    | ✅    |
 | 3 — Embed + index + hybrid search + rerank | 🟡 code complete* |
 | 4 — `/chat` with citation contract + SSE   | 🟡 code complete* |
-| 5 — Tauri desktop UI                       | ⬜    |
+| 5 — Tauri desktop UI                       | 🟡 code complete* |
 | 6 — Gold dataset + eval scorecard          | ⬜    |
 | 7 — Polish (diagram, GIF, demo)            | ⬜    |
 

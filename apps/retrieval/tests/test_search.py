@@ -39,3 +39,18 @@ def test_run_search_orders_by_rerank_score() -> None:
 def test_run_search_truncates_to_k() -> None:
     response = run_search(deps_with([]), SearchRequest(q="frage", lang="de", k=2))
     assert len(response.results) == 2
+
+
+def test_run_search_returns_empty_when_no_candidates() -> None:
+    def exploding_rerank(q: str, texts: list[str]) -> list[float]:
+        raise AssertionError("rerank must not be called with no candidates")
+
+    deps = SearchDeps(
+        embed=lambda q: [0.0] * 1024,
+        dense=lambda vector, k: [],
+        fts=lambda q, lang, k: [],
+        rerank=exploding_rerank,
+    )
+    response = run_search(deps, SearchRequest(q="frage", lang="de"))
+    assert response.results == []
+    assert set(response.took_ms) == {"embed", "search", "rerank"}

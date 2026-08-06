@@ -4,8 +4,16 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from ingestion.akoma import AKN_NS, MAX_CHUNK_CHARS, article_number, article_text, marginal_heading, parse_act
-from ingestion.models import ManifestEntry
+from ingestion.akoma import (
+    AKN_NS,
+    MAX_CHUNK_CHARS,
+    _disambiguate_duplicate_keys,
+    article_number,
+    article_text,
+    marginal_heading,
+    parse_act,
+)
+from ingestion.models import Chunk, ManifestEntry
 from tests.conftest import akn_doc
 
 
@@ -159,29 +167,65 @@ def test_parse_act_disambiguates_duplicate_eid(tmp_path: Path) -> None:
     assert by_article["220"].eid == "art_221"
 
 
-def test_parse_act_disambiguates_cascading_chain(tmp_path: Path) -> None:
-    # Offline regression net for the fixed-point iteration in
-    # _disambiguate_duplicate_keys: a singleton (art_220, mislabeled as Art. 219)
-    # is untouched in pass 1, then pulled into pass 2 once the duplicate-pair
-    # rewrite lands on its anchor. A single-pass implementation leaves Art. 219
-    # and the rebuilt Art. 220 both on "#art_220" and never resolves this.
-    xml_path = write_doc(tmp_path,
-        '<article eId="art_220"><num>Art. 219</num>'
-        '<paragraph eId="art_220/para"><content><p>Text 219.</p></content></paragraph></article>'
-        '<article eId="art_221"><num>Art. 221</num>'
-        '<paragraph eId="art_221/para"><content><p>Text 221.</p></content></paragraph></article>'
-        '<article eId="art_221"><num>Art. 220</num>'
-        '<paragraph eId="art_221/para2"><content><p>Text 220.</p></content></paragraph></article>'
+_ELI = "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/fr"
+
+
+def _entry() -> ManifestEntry:
+    return ManifestEntry(
+        sr="220", lang="fr", eli=_ELI, act_name="Code des obligations",
+        abbrev="CO", version_date=date(2026, 1, 1),
+        file_url="https://fedlex.data.admin.ch/example.xml",
     )
-    chunks = parse_act(xml_path, entry_for())
-    assert len(chunks) == 3
-    by_article = {c.article: c for c in chunks}
-    assert set(by_article) == {"219", "220", "221"}
-    elis = {c.eli for c in chunks}
-    assert len(elis) == 3
-    assert by_article["221"].eli.endswith("#art_221")
-    assert by_article["220"].eli.endswith("#art_220")
-    assert by_article["219"].eli.endswith("#art_219")
+
+
+def _chunk(article: str, eid: str) -> Chunk:
+    return Chunk(
+        sr="220", lang="fr", article=article, eid=eid, part=None,
+        heading=None, context=None, text=f"Art. {article}\nbody",
+        eli=f"{_ELI}#{eid}", act_name="Code des obligations", abbrev="CO",
+        version_date=date(2026, 1, 1),
+    )
+
+
+def test_disambiguation_never_steals_another_articles_anchor() -> None:
+    # Real FR SR 220 shape: element art_220 holds Art. 219's text (header override),
+    # element art_221 is duplicated between Art. 220 and Art. 221.
+    chunks = [_chunk("219", "art_220"), _chunk("220", "art_221"), _chunk("221", "art_221")]
+    eid_articles = {"art_220": {"219"}, "art_221": {"220", "221"}}
+
+    resolved = _disambiguate_duplicate_keys(chunks, _entry(), eid_articles)
+
+    by_article = {c.article: c for c in resolved}
+    # Art. 220 may NOT take "#art_220" — that element belongs to Art. 219. Act-level fallback.
+    assert by_article["220"].eli == _ELI
+    # Art. 219 was never in a colliding group: keeps its (correct) source anchor.
+    assert by_article["219"].eli == f"{_ELI}#art_220"
+    assert by_article["221"].eli == f"{_ELI}#art_221"
+
+
+def test_disambiguation_allows_absent_anchor() -> None:
+    # IT SR 220 shape: art_219 duplicated between Art. 219 and Art. 219a;
+    # "art_219_a" does not exist in the document, so synthesizing it is fine.
+    chunks = [_chunk("219", "art_219"), _chunk("219a", "art_219")]
+    eid_articles = {"art_219": {"219", "219a"}}
+
+    resolved = _disambiguate_duplicate_keys(chunks, _entry(), eid_articles)
+
+    by_article = {c.article: c for c in resolved}
+    assert by_article["219"].eli == f"{_ELI}#art_219"
+    assert by_article["219a"].eli == f"{_ELI}#art_219_a"
+
+
+def test_disambiguation_never_synthesizes_top_level_anchor_for_annex_article() -> None:
+    # Nested eIds ("anx_1/art_2") must not be rehomed onto a top-level "art_..." anchor.
+    chunks = [_chunk("2", "anx_1/art_2"), _chunk("3", "anx_1/art_2")]
+    eid_articles = {"anx_1/art_2": {"2", "3"}}
+
+    resolved = _disambiguate_duplicate_keys(chunks, _entry(), eid_articles)
+
+    by_article = {c.article: c for c in resolved}
+    assert by_article["2"].eli == f"{_ELI}#anx_1/art_2"  # article 2 matches eid number: keeps
+    assert by_article["3"].eli == _ELI                    # mismatched nested: act-level, never "#art_3"
 
 
 def test_parse_act_splits_oversized_articles(tmp_path: Path) -> None:

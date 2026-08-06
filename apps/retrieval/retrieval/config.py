@@ -10,6 +10,7 @@ class Settings:
     ollama_base_url: str
     embedding_model: str
     reranker_model: str
+    chat_model: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -21,4 +22,5 @@ class Settings:
             ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
             embedding_model=os.environ.get("EMBEDDING_MODEL", "bge-m3"),
             reranker_model=os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
+            chat_model=os.environ.get("OLLAMA_CHAT_MODEL", "qwen3:4b"),
         )

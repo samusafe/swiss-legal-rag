@@ -108,16 +108,13 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
     if not articles:
         raise RuntimeError(f"no articles found in SR {entry.sr} ({entry.lang}): {xml_path}")
     chunks: list[Chunk] = []
+    eid_articles: dict[str, set[str]] = {}
     for article in articles:
         eid = article.get("eId")
         if eid is None:
             raise RuntimeError(f"article without eId in SR {entry.sr} ({entry.lang})")
         text = article_text(article)
         header, _, body = text.partition("\n")
-        # Repealed/not-yet-in-force articles have empty bodies after footnote stripping.
-        # Also skip repeal-stub bodies (e.g., "Aufgehoben", "Abrogés").
-        if not body.strip() or _REPEAL_ONLY_RE.match(body.strip()):
-            continue
         number = article_number(eid)
         # SR 220 FR has duplicate source eIds (e.g. two <article eId="art_221">) where
         # the <num> text is authoritative; prefer it over the eId-derived number when
@@ -125,6 +122,11 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
         header_number = header.removeprefix("Art.").strip()
         if _HEADER_NUMBER_RE.match(header_number) and header_number != number:
             number = header_number
+        eid_articles.setdefault(eid, set()).add(number)
+        # Repealed/not-yet-in-force articles have empty bodies after footnote stripping.
+        # Also skip repeal-stub bodies (e.g., "Aufgehoben", "Abrogés").
+        if not body.strip() or _REPEAL_ONLY_RE.match(body.strip()):
+            continue
         heading = marginal_heading(article)
         context = marginal_breadcrumb(article)
         for part, part_text in _split_oversized(text):
@@ -146,25 +148,23 @@ def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
             )
     if not chunks:
         raise RuntimeError(f"no chunks produced for SR {entry.sr} ({entry.lang}): every article was empty or repealed")
-    chunks = _disambiguate_duplicate_keys(chunks, entry)
+    chunks = _disambiguate_duplicate_keys(chunks, entry, eid_articles)
     return chunks
 
 
-def _disambiguate_duplicate_keys(chunks: list[Chunk], entry: ManifestEntry) -> list[Chunk]:
+def _disambiguate_duplicate_keys(
+    chunks: list[Chunk], entry: ManifestEntry, eid_articles: dict[str, set[str]]
+) -> list[Chunk]:
     # Fedlex XML has real duplicate source eIds (e.g. two <article eId="art_221"> in
     # SR 220 FR — one for Art. 220, one for Art. 221). Both chunks then share the same
-    # (eli, part) key. Within a colliding group, the chunk whose article number
-    # agrees with the eId keeps the original eId anchor (it's what resolves on
-    # fedlex.admin.ch, so it's preferred whenever unique); the mislabeled one gets a
-    # synthesized anchor built from its true article number instead. A single rewrite
-    # can itself land on an anchor already used by an untouched singleton (SR 220 FR
-    # is a 3-way chain: art_220 alone holds Art. 219's text via a plain header
-    # override, while art_221 is duplicated between Art. 220 and Art. 221 — rehoming
-    # Art. 220 onto "#art_220" collides with that untouched Art. 219 chunk). So this
-    # loops to a fixed point: each pass only touches chunks currently in a colliding
-    # group, which lets newly-created collisions cascade to resolution (Art. 219 then
-    # moves to its own "#art_219", freeing "#art_220" for Art. 220) without touching
-    # any mismatched chunk that was never actually colliding with anything.
+    # (eli, part) key. Within a colliding group, a mislabeled chunk gets rehomed to a
+    # synthesized anchor, but only if that anchor is not already owned by a different
+    # article's element in this document — an anchor absent from the document is
+    # harmless (browsers ignore unknown fragments), one owned by someone else falls
+    # back to the bare act-level ELI instead. This loops to a fixed point since a
+    # rewrite can create new collisions. In real FR SR 220 this means the 3-way chain
+    # no longer cascades: Art. 219 keeps "#art_220" (that element holds its text),
+    # and Art. 220 falls back to the act-level ELI (art_220 is owned by Art. 219).
     resolved = list(chunks)
     for _ in range(len(chunks) + 1):  # generous bound; real corpus converges in 2 passes
         key_counts = Counter((c.eli, c.part or 0) for c in resolved)
@@ -173,7 +173,7 @@ def _disambiguate_duplicate_keys(chunks: list[Chunk], entry: ManifestEntry) -> l
         for chunk in resolved:
             key = (chunk.eli, chunk.part or 0)
             if key_counts[key] > 1 and chunk.article != article_number(chunk.eid):
-                new_eli = f"{entry.eli}#{_anchor_from_article(chunk.article)}"
+                new_eli = _rehome_eli(chunk, entry, eid_articles)
                 if new_eli != chunk.eli:
                     chunk = chunk.model_copy(update={"eli": new_eli})
                     changed = True
@@ -191,3 +191,17 @@ def _disambiguate_duplicate_keys(chunks: list[Chunk], entry: ManifestEntry) -> l
                 f"({entry.lang}): eli={key[0]} part={key[1]} articles={articles}"
             )
     return resolved
+
+
+def _rehome_eli(chunk: Chunk, entry: ManifestEntry, eid_articles: dict[str, set[str]]) -> str:
+    # A synthesized top-level anchor for a nested (annex) article would point outside
+    # the annex — link the act instead.
+    if "/" in chunk.eid:
+        return entry.eli
+    anchor = _anchor_from_article(chunk.article)
+    owners = eid_articles.get(anchor)
+    if owners is not None and chunk.article not in owners:
+        # The anchor exists in the document but belongs to a different article —
+        # never point a citation at someone else's element. Act-level link instead.
+        return entry.eli
+    return f"{entry.eli}#{anchor}"

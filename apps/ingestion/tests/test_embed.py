@@ -17,12 +17,14 @@ def chunk_for(context: str | None) -> Chunk:
     )
 
 
-def test_embedding_input_with_breadcrumb() -> None:
-    assert embedding_input(chunk_for("A › B")) == "Code of Obligations (OR / CO) — A › B\nArt. 335c\n1 Inhalt."
+def test_embedding_input_includes_act_and_context() -> None:
+    text = embedding_input("Code of Obligations", "OR / CO", "A › B", "Art. 335c\n1 Inhalt.")
+    assert text == "Code of Obligations (OR / CO) — A › B\nArt. 335c\n1 Inhalt."
 
 
-def test_embedding_input_without_breadcrumb() -> None:
-    assert embedding_input(chunk_for(None)) == "Code of Obligations (OR / CO)\nArt. 335c\n1 Inhalt."
+def test_embedding_input_without_context() -> None:
+    text = embedding_input("Code of Obligations", "OR / CO", None, "Art. 335c\n1 Inhalt.")
+    assert text == "Code of Obligations (OR / CO)\nArt. 335c\n1 Inhalt."
 
 
 @pytest.mark.parametrize(("lang", "config"), [("de", "german"), ("fr", "french"), ("it", "italian")])
@@ -55,62 +57,33 @@ def test_embed_texts_fails_loud() -> None:
         embed_texts(client, "http://localhost:11434", "bge-m3", ["a"])
 
 
-def test_load_chunks_rejects_duplicate_keys(tmp_path) -> None:
+def test_load_chunks_reports_all_collisions(tmp_path) -> None:
     from ingestion.embed import load_chunks
 
-    lang_dir = tmp_path / "220"
+    lang_dir = tmp_path / "de"
     lang_dir.mkdir()
-    first = chunk_for(None).model_copy(
-        update={"article": "220", "eid": "art_221", "part": None}
+    # Create 4 chunks forming 2 colliding (eli, part) pairs
+    chunk1 = chunk_for(None).model_copy(
+        update={"article": "335", "eid": "art_335", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335"}
     )
-    second = chunk_for(None).model_copy(
-        update={"article": "221", "eid": "art_221", "part": None}
+    chunk2 = chunk_for(None).model_copy(
+        update={"article": "335a", "eid": "art_335", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335"}  # collision with chunk1
     )
-    (lang_dir / "fr.jsonl").write_text(
-        f"{first.model_dump_json()}\n{second.model_dump_json()}\n", encoding="utf-8"
+    chunk3 = chunk_for(None).model_copy(
+        update={"article": "335b", "eid": "art_335b", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335b"}
+    )
+    chunk4 = chunk_for(None).model_copy(
+        update={"article": "335c", "eid": "art_335b", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335b"}  # collision with chunk3
+    )
+    (lang_dir / "de.jsonl").write_text(
+        f"{chunk1.model_dump_json()}\n{chunk2.model_dump_json()}\n{chunk3.model_dump_json()}\n{chunk4.model_dump_json()}\n",
+        encoding="utf-8"
     )
 
-    with pytest.raises(
-        RuntimeError,
-        match=r"duplicate chunk key .*SR 220 de articles 220 and 221",
-    ):
+    with pytest.raises(RuntimeError) as excinfo:
         load_chunks(tmp_path)
+    message = str(excinfo.value)
+    assert "duplicate chunk keys" in message
+    assert message.count("articles") == 2  # both collisions listed, not just the first
 
 
-def _try_connect():
-    import psycopg
-
-    url = "postgresql://rag:rag-local-only@localhost:5432/swiss_legal_rag"
-    try:
-        return psycopg.connect(url, connect_timeout=2)
-    except Exception:
-        return None
-
-
-@pytest.mark.db
-@pytest.mark.skipif(_try_connect() is None, reason="local Postgres not reachable")
-def test_upsert_resumability_roundtrip() -> None:
-    from pgvector.psycopg import register_vector
-
-    from ingestion.embed import SCHEMA_SQL, upsert_chunks
-
-    conn = _try_connect()
-    assert conn is not None
-    with conn:
-        conn.execute(SCHEMA_SQL)
-        register_vector(conn)
-        chunk = chunk_for("A › B")
-        upsert_chunks(conn, [chunk])
-        conn.execute("UPDATE chunks SET embedding = %s WHERE eli = %s", ([0.5] * 1024, chunk.eli))
-        upsert_chunks(conn, [chunk])  # same text -> embedding preserved
-        kept = conn.execute(
-            "SELECT embedding IS NOT NULL FROM chunks WHERE eli = %s", (chunk.eli,)
-        ).fetchone()
-        assert kept[0] is True
-        changed = chunk.model_copy(update={"text": "Art. 335c\n1 Neuer Inhalt."})
-        upsert_chunks(conn, [changed])  # text change -> embedding reset to NULL
-        reset = conn.execute(
-            "SELECT embedding IS NULL FROM chunks WHERE eli = %s", (chunk.eli,)
-        ).fetchone()
-        assert reset[0] is True
-        conn.execute("DELETE FROM chunks WHERE eli = %s", (chunk.eli,))

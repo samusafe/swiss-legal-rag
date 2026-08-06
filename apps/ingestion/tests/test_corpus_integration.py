@@ -58,3 +58,29 @@ def test_all_generated_chunk_keys_are_globally_unique() -> None:
     # raw present but `ingest parse` never run, CHUNKS_DIR.glob would yield nothing
     # and the loop above would pass having asserted nothing. Fail loud on that.
     assert len(seen) > 12000, f"only {len(seen)} chunk keys found — run `ingest parse` first"
+
+
+@pytest.mark.skipif(not CHUNKS_DIR.exists(), reason="run `ingest parse` first")
+def test_disambiguation_never_steals_another_articles_anchor_on_real_corpus() -> None:
+    # Real FR/IT SR 220 shapes exercised by _disambiguate_duplicate_keys (see
+    # test_akoma.py for the offline unit tests this mirrors):
+    # - FR: art_220 genuinely holds Art. 219's text (header override); art_221 is
+    #   duplicated between Art. 220 and Art. 221. Art. 220 may not steal "#art_220"
+    #   (it belongs to Art. 219) — act-level ELI instead. Art. 219 was never
+    #   colliding, so it keeps its correct source anchor "#art_220".
+    # - IT: art_219 is duplicated between Art. 219 and Art. 219a. "#art_219_a" is
+    #   absent from the document, so synthesizing it for Art. 219a is harmless.
+    by_article: dict[tuple[str, str], dict] = {}
+    for path in [CHUNKS_DIR / "220" / "fr.jsonl", CHUNKS_DIR / "220" / "it.jsonl"]:
+        lang = path.stem
+        for line in path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            by_article[(lang, record["article"])] = record
+
+    # Vacuity guard: prove the test actually saw the rewritten chunks, not an empty file.
+    assert len(by_article) > 0, f"no chunks found under {CHUNKS_DIR / '220'} — run `ingest parse` first"
+
+    fr_eli = by_article[("fr", "220")]["eli"]
+    assert fr_eli == "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/fr", fr_eli
+    assert by_article[("fr", "219")]["eli"].endswith("#art_220")
+    assert by_article[("it", "219a")]["eli"].endswith("#art_219_a")

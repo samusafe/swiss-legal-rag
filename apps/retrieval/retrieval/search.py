@@ -27,6 +27,17 @@ def run_search(deps: SearchDeps, request: SearchRequest) -> SearchResponse:
     fused_ids = rrf([[r.id for r in dense_rows], [r.id for r in fts_rows]])[:CANDIDATES]
     candidates = [by_id[i] for i in fused_ids]
     t2 = time.perf_counter()
+    if not candidates:
+        # CrossEncoder.predict([]) raises in sentence-transformers 3.x — and there is
+        # nothing to rank anyway.
+        return SearchResponse(
+            results=[],
+            took_ms={
+                "embed": int((t1 - t0) * 1000),
+                "search": int((t2 - t1) * 1000),
+                "rerank": 0,
+            },
+        )
     scores = deps.rerank(request.q, [row.text for row in candidates])
     ranked = sorted(zip(candidates, scores), key=lambda pair: -pair[1])[: request.k]
     t3 = time.perf_counter()

@@ -1,14 +1,12 @@
 # retrieval
 
-FastAPI service exposing hybrid search over the Swiss federal law corpus: dense retrieval (pgvector cosine similarity) and Postgres full-text search fused with Reciprocal Rank Fusion (RRF), then re-ordered by a cross-encoder reranker for final relevance. The query-time service between the desktop app and the corpus — Postgres and Ollama are reached through it at query time.
-
-`/chat` (RAG with citation contract, SSE streaming) lands in a later milestone.
+FastAPI service exposing hybrid search and RAG chat over the Swiss federal law corpus: dense retrieval (pgvector cosine similarity) and Postgres full-text search fused with Reciprocal Rank Fusion (RRF), re-ordered by a cross-encoder reranker, then handed to a local LLM for a cited answer streamed over SSE. The query-time service between the desktop app and the corpus — Postgres and Ollama are reached through it at query time.
 
 ## Prerequisites
 
 1. Postgres with pgvector, running and embedded: `docker compose up -d` (from repo root), then `ingest embed` from `apps/ingestion` — see [`apps/ingestion/README.md`](../ingestion/README.md).
-2. Ollama running with the embedding model pulled: `ollama pull bge-m3`, then `ollama serve` (or the desktop app).
-3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`.
+2. Ollama running with the embedding and chat models pulled: `ollama pull bge-m3`, `ollama pull qwen3:4b`, then `ollama serve` (or the desktop app).
+3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`.
 
 ## Setup
 
@@ -94,6 +92,54 @@ Response:
 Every result carries its official ELI link and SR/article citation (`[SR 220 Art. 335c]`), matching the citation contract used by `/chat`.
 
 If Ollama is unreachable, `/search` returns `503` with an actionable message naming the endpoint it tried to reach.
+
+### `POST /chat`
+
+Runs `/search` internally to retrieve the top-`k` articles, then streams a generated answer over Server-Sent Events (SSE). Requires the chat model pulled in Ollama: `ollama pull qwen3:4b` (or set `OLLAMA_CHAT_MODEL` to a different local model).
+
+Request:
+
+```json
+{ "question": "Welche Kündigungsfrist gilt im ersten Dienstjahr?", "lang": "de", "k": 5 }
+```
+
+- `lang` — one of `de`, `fr`, `it` (both the FTS query language and the language the answer is generated in).
+- `k` — number of retrieved articles to ground the answer in (default 5, min 1, max 20).
+
+```
+curl -N -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Welche Kündigungsfrist gilt im ersten Dienstjahr?", "lang": "de"}'
+```
+
+The response is `text/event-stream` with four event types, in order:
+
+| Event    | When                          | Payload                                                       |
+| -------- | ------------------------------ | -------------------------------------------------------------- |
+| `sources`| once, before generation starts | `{ "sources": [ { "sr", "article", "heading", "eli", "lang", "score" }, ... ] }` |
+| `token`  | once per generated token/delta | `{ "delta": "<text fragment>" }`                                |
+| `done`   | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
+| `error`  | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
+
+Example stream (abridged):
+
+```
+event: sources
+data: {"sources": [{"sr": "220", "article": "335c", "heading": "nach Ablauf der Probezeit", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "lang": "de", "score": 6.87}]}
+
+event: token
+data: {"delta": "Im ersten Dienstjahr gilt "}
+
+event: token
+data: {"delta": "eine Kündigungsfrist von einem Monat [SR 220 Art. 335c]."}
+
+event: done
+data: {"citations": [{"raw": "[SR 220 Art. 335c]", "sr": "220", "article": "335c", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "resolved": true}], "model": "qwen3:4b", "duration_ms": 4213}
+```
+
+Every answer cites its sources inline as `[SR <nr> Art. <x>]`; the `done` event resolves each citation back to its retrieved source (`resolved: true`) or flags it as unresolved (`resolved: false`) if the model cited something outside the retrieved articles. If the retrieved articles don't answer the question, the model is instructed to say so and refuses to answer rather than cite anything.
+
+Retrieval failures (Ollama embeddings or Postgres unreachable) happen before any bytes stream and return a plain `503`, matching `/search`. Generation failures (Ollama chat unreachable or erroring mid-stream) happen after the response has already started streaming, so they surface as an `error` event instead.
 
 ## Tests
 

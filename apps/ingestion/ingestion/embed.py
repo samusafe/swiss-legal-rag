@@ -46,6 +46,11 @@ ON CONFLICT (eli, part) DO UPDATE SET
     abbrev = EXCLUDED.abbrev, version_date = EXCLUDED.version_date,
     text = EXCLUDED.text, tsv = EXCLUDED.tsv,
     embedding = CASE WHEN chunks.text = EXCLUDED.text THEN chunks.embedding ELSE NULL END
+WHERE (chunks.sr, chunks.lang, chunks.article, chunks.eid, chunks.heading, chunks.context,
+       chunks.act_name, chunks.abbrev, chunks.version_date, chunks.text)
+      IS DISTINCT FROM
+      (EXCLUDED.sr, EXCLUDED.lang, EXCLUDED.article, EXCLUDED.eid, EXCLUDED.heading, EXCLUDED.context,
+       EXCLUDED.act_name, EXCLUDED.abbrev, EXCLUDED.version_date, EXCLUDED.text)
 """
 
 
@@ -56,11 +61,11 @@ def ts_config(lang: str) -> str:
     return config
 
 
-def embedding_input(chunk: Chunk) -> str:
-    prefix = f"{chunk.act_name} ({chunk.abbrev})"
-    if chunk.context:
-        prefix = f"{prefix} — {chunk.context}"
-    return f"{prefix}\n{chunk.text}"
+def embedding_input(act_name: str, abbrev: str, context: str | None, text: str) -> str:
+    prefix = f"{act_name} ({abbrev})"
+    if context:
+        prefix = f"{prefix} — {context}"
+    return f"{prefix}\n{text}"
 
 
 def embed_texts(
@@ -89,18 +94,24 @@ def load_chunks(chunks_dir: Path) -> list[Chunk]:
 
 def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
     # ON CONFLICT (eli, part) DO UPDATE silently drops one chunk per collision
-    # (last write wins) — fail loud instead. Disambiguation is deferred to M4.
+    # (last write wins) — fail loud, and report every collision at once.
     seen: dict[tuple[str, int], Chunk] = {}
+    collisions: list[str] = []
     for chunk in chunks:
         key = (chunk.eli, chunk.part or 0)
         prior = seen.get(key)
         if prior is not None:
-            raise RuntimeError(
-                f"duplicate chunk key (eli={chunk.eli}, part={key[1]}): "
-                f"SR {chunk.sr} {chunk.lang} articles {prior.article} and {chunk.article} "
-                "— duplicate source eId in Fedlex XML"
+            collisions.append(
+                f"eli={chunk.eli} part={key[1]}: SR {chunk.sr} {chunk.lang} "
+                f"articles {prior.article} and {chunk.article}"
             )
-        seen[key] = chunk
+        else:
+            seen[key] = chunk
+    if collisions:
+        raise RuntimeError(
+            "duplicate chunk keys — duplicate source eIds in Fedlex XML:\n  "
+            + "\n  ".join(collisions)
+        )
 
 
 def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
@@ -126,12 +137,7 @@ def embed_pending(
     done = 0
     for start in range(0, len(rows), batch_size):
         batch = rows[start : start + batch_size]
-        texts = [
-            embedding_input(
-                Chunk.model_construct(act_name=r[1], abbrev=r[2], context=r[3], text=r[4])
-            )
-            for r in batch
-        ]
+        texts = [embedding_input(r[1], r[2], r[3], r[4]) for r in batch]
         vectors = embed_texts(client, base_url, model, texts)
         with conn.cursor() as cur:
             for row, vector in zip(batch, vectors, strict=True):

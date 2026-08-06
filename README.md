@@ -49,11 +49,13 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 | 0 — Repo scaffold, Docker Compose, README  | ✅    |
 | 1 — SPARQL resolve + fetch (10-act corpus) | ✅    |
 | 2 — Akoma Ntoso parser → article chunks    | ✅    |
-| 3 — Embed + index + hybrid search + rerank | ⬜    |
-| 4 — `/chat` with citation contract + SSE   | ⬜    |
+| 3 — Embed + index + hybrid search + rerank | 🟡 code complete* |
+| 4 — `/chat` with citation contract + SSE   | 🟡 code complete* |
 | 5 — Tauri desktop UI                       | ⬜    |
 | 6 — Gold dataset + eval scorecard          | ⬜    |
 | 7 — Polish (diagram, GIF, demo)            | ⬜    |
+
+\* implemented and unit-tested; end-to-end verification against a fully embedded corpus is still pending.
 
 ## License
 

@@ -10,6 +10,12 @@ class SearchRequest(BaseModel):
     k: int = Field(default=5, ge=1, le=20)
 
 
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=1)
+    lang: Literal["de", "fr", "it"]
+    k: int = Field(default=5, ge=1, le=20)
+
+
 class SearchResult(BaseModel):
     sr: str
     lang: str

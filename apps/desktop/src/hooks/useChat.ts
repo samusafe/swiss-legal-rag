@@ -7,6 +7,8 @@ export interface ChatMessage {
   text: string;
   citations: Citation[];
   error: string | null;
+  stopped?: boolean;
+  sources?: Source[];
 }
 
 function updateLast(
@@ -46,6 +48,9 @@ export function useChat() {
           switch (event.type) {
             case "sources":
               setSources(event.sources);
+              setMessages((prev) =>
+                updateLast(prev, (m) => ({ ...m, sources: event.sources })),
+              );
               break;
             case "token":
               setMessages((prev) =>
@@ -65,17 +70,22 @@ export function useChat() {
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // Nothing streamed yet: drop the empty assistant bubble; the banner
-        // carries the failure. Mid-stream drops keep their partial text.
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last !== undefined && last.role === "assistant" && last.text === "") {
-            return prev.slice(0, -1);
-          }
-          return updateLast(prev, (m) => ({ ...m, error: message }));
-        });
-        setBanner(message);
+        if (controller.signal.aborted) {
+          // Stopped by the user: keep the partial text, no banner.
+          setMessages((prev) => updateLast(prev, (m) => ({ ...m, stopped: true })));
+        } else {
+          const message = error instanceof Error ? error.message : String(error);
+          // Nothing streamed yet: drop the empty assistant bubble; the banner
+          // carries the failure. Mid-stream drops keep their partial text.
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last !== undefined && last.role === "assistant" && last.text === "") {
+              return prev.slice(0, -1);
+            }
+            return updateLast(prev, (m) => ({ ...m, error: message }));
+          });
+          setBanner(message);
+        }
       } finally {
         setStreaming(false);
         abortRef.current = null;
@@ -84,5 +94,9 @@ export function useChat() {
     [lang],
   );
 
-  return { messages, sources, lang, setLang, streaming, banner, send };
+  const stop = useCallback((): void => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { messages, sources, lang, setLang, streaming, banner, send, stop };
 }

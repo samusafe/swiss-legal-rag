@@ -4,11 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CitationChip } from "./CitationChip";
 
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: vi.fn().mockResolvedValue(undefined),
+vi.mock("../lib/open", () => ({
+  openExternal: vi.fn(),
 }));
 
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "../lib/open";
 
 const RESOLVED = {
   raw: "[SR 220 Art. 335c]",
@@ -36,7 +36,7 @@ describe("CitationChip", () => {
 
     await user.click(screen.getByRole("button", { name: "[SR 220 Art. 335c]" }));
 
-    expect(openUrl).toHaveBeenCalledWith("https://example.test/e");
+    expect(openExternal).toHaveBeenCalledWith("https://example.test/e");
   });
 
   it("renders unresolved citations as plain, non-clickable chips", () => {

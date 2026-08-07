@@ -1,6 +1,6 @@
 import { Button, Chip } from "@heroui/react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Citation } from "../lib/api";
+import { openExternal } from "../lib/open";
 
 export function CitationChip({ citation }: { citation: Citation }) {
   if (!citation.resolved || citation.eli === null) {
@@ -17,9 +17,8 @@ export function CitationChip({ citation }: { citation: Citation }) {
       variant="flat"
       color="primary"
       className="mx-0.5 h-6 min-w-0 px-2 align-baseline"
-      onPress={() =>
-        openUrl(eli).catch((error: unknown) => console.error("failed to open URL", error))
-      }
+      onPress={() => openExternal(eli)}
+      onClick={(event) => event.stopPropagation()}
     >
       {citation.raw}
     </Button>

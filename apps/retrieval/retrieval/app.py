@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from retrieval.citations import extract_citations
@@ -14,6 +15,14 @@ from retrieval.config import Settings
 from retrieval.db import connect, dense_search, fts_search
 from retrieval.embeddings import embed_query
 from retrieval.generation import build_messages, stream_chat
+from retrieval.ingest import (
+    IngestState,
+    embedded_count,
+    ingest_status,
+    ingestion_python,
+    phase_progress,
+    start_ingest,
+)
 from retrieval.models import ChatRequest, SearchRequest, SearchResponse
 from retrieval.rerank import Reranker
 from retrieval.search import SearchDeps, run_search
@@ -74,9 +83,21 @@ def create_app() -> FastAPI:
         _close_client(app)
 
     app = FastAPI(title="swiss-legal-rag retrieval", lifespan=lifespan)
+    # Desktop webview origins: Vite dev server and Tauri's production origin.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:1420",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.deps = None
     app.state.conn = None
     app.state.client = None
+    app.state.ingest = IngestState()
 
     @app.post("/search")
     def search(request: SearchRequest) -> SearchResponse:
@@ -157,6 +178,42 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ingest/status")
+    def get_ingest_status() -> dict:
+        return ingest_status(app.state.ingest, app.state.settings.database_url)
+
+    @app.post("/ingest", status_code=202)
+    def post_ingest() -> dict[str, str]:
+        python = ingestion_python(app.state.settings.ingestion_python)
+        if not start_ingest(app.state.ingest, python):
+            raise HTTPException(status_code=409, detail="an ingest run is already active")
+        return {"status": "started"}
+
+    @app.get("/ingest/progress")
+    def ingest_progress() -> StreamingResponse:
+        state = app.state.ingest
+        database_url = app.state.settings.database_url
+
+        def events() -> Iterator[str]:
+            while True:
+                with state.lock:
+                    running = state.running
+                    phase = state.phase if running else None
+                current = phase if phase is not None else "embed"
+                done, total = phase_progress(current, database_url)
+                yield _sse("progress", {"phase": current, "done": done, "total": total})
+                if not running:
+                    break
+                time.sleep(1.0)
+            with state.lock:
+                error = state.error
+            if error is not None:
+                yield _sse("error", {"detail": error})
+            else:
+                yield _sse("done", {"chunks_embedded": embedded_count(database_url)})
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     return app
 

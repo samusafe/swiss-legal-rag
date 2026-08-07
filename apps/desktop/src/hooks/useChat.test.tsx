@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../lib/api";
 import { useChat } from "./useChat";
@@ -58,11 +58,26 @@ describe("useChat", () => {
         text: "Die Frist beträgt einen Monat [SR 220 Art. 335c].",
         citations: [CITATION],
         error: null,
+        sources: [SOURCE],
       },
     ]);
     expect(result.current.sources).toEqual([SOURCE]);
     expect(result.current.streaming).toBe(false);
     expect(result.current.banner).toBeNull();
+  });
+
+  it("attaches the answer's sources to the assistant message", async () => {
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE] },
+        { type: "token", delta: "x" },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("q");
+    });
+    expect(result.current.messages.at(-1)?.sources).toEqual([SOURCE]);
   });
 
   it("keeps partial text and flags the message on a mid-stream error event", async () => {
@@ -159,5 +174,59 @@ describe("useChat", () => {
     await act(async () => {
       await first;
     });
+  });
+
+  it("stop() with no in-flight run is a safe no-op, including called twice", () => {
+    const { result } = renderHook(() => useChat());
+
+    expect(() => {
+      act(() => {
+        result.current.stop();
+      });
+    }).not.toThrow();
+    expect(() => {
+      act(() => {
+        result.current.stop();
+      });
+    }).not.toThrow();
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.banner).toBeNull();
+  });
+
+  it("stop() keeps the partial text, marks it stopped and shows no banner", async () => {
+    postChatMock.mockImplementation(async function* (
+      _question: string,
+      _lang: "de" | "fr" | "it",
+      signal: AbortSignal,
+    ) {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.messages.at(-1)?.text).toBe("Partial "));
+
+    act(() => {
+      result.current.stop();
+    });
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "Partial ",
+      stopped: true,
+      error: null,
+    });
+    expect(result.current.banner).toBeNull();
+    expect(result.current.streaming).toBe(false);
   });
 });

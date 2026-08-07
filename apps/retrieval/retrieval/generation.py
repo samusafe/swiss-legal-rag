@@ -55,6 +55,16 @@ def stream_chat(
                     f"Ollama chat failed (HTTP {response.status_code}) — is `ollama serve` "
                     f"running at {base_url} and `{model}` pulled?"
                 )
+            # Ollama 0.32.4 ignores `think: false` (and qwen3's /no_think) for
+            # hybrid-reasoning models: content streams the raw reasoning with NO
+            # opening <think> tag, then "</think>", then the answer. Drop
+            # everything up to and including the first marker. A marker-less
+            # stream (thinking properly disabled) is buffered and flushed once at
+            # the end — accepted trade-off; remove this filter when Ollama
+            # honors `think: false`.
+            marker = "</think>"
+            thinking = True
+            buffer = ""
             for line in response.iter_lines():
                 if not line:
                     continue
@@ -84,8 +94,28 @@ def stream_chat(
                         f"{line[:200]!r}"
                     ) from error
                 if not delta:
-                    continue  # hybrid-reasoning models emit empty deltas while thinking
+                    # Ollama itself emits empty deltas while thinking; skip those before
+                    # they ever reach the buffering below — they carry nothing to buffer.
+                    continue
+                if thinking:
+                    buffer += delta
+                    index = buffer.find(marker)
+                    if index == -1:
+                        # No marker yet: yield our own empty heartbeat (distinct from the
+                        # empty deltas skipped above) so FastAPI gets a suspension point —
+                        # a client disconnect (Stop) can then cancel this generator and
+                        # close the httpx stream to Ollama mid-thinking, instead of only
+                        # being noticed once the marker is found.
+                        yield ""
+                        continue
+                    thinking = False
+                    delta = buffer[index + len(marker) :].lstrip("\n")
+                    if not delta:
+                        continue
                 yield delta
+            if thinking and buffer:
+                # Marker never appeared — the stream was the answer itself.
+                yield buffer
     except httpx.HTTPError as error:
         raise RuntimeError(
             f"Ollama unreachable at {base_url} — is `ollama serve` running and "

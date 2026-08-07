@@ -4,11 +4,15 @@ import { Button, Textarea } from "@heroui/react";
 export function Composer({
   disabled,
   offline,
+  streaming,
   onSend,
+  onStop,
 }: {
   disabled: boolean;
   offline: boolean;
+  streaming: boolean;
   onSend: (question: string) => void;
+  onStop: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const trimmed = draft.trim();
@@ -37,9 +41,15 @@ export function Composer({
           }
         }}
       />
-      <Button color="primary" isDisabled={disabled || trimmed === ""} onPress={submit}>
-        Send
-      </Button>
+      {streaming ? (
+        <Button color="danger" aria-label="Stop" onPress={onStop}>
+          {"■︎"} Stop
+        </Button>
+      ) : (
+        <Button color="primary" isDisabled={disabled || trimmed === ""} onPress={submit}>
+          Send
+        </Button>
+      )}
     </div>
   );
 }

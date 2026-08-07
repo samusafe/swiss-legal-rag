@@ -6,7 +6,7 @@ FastAPI service exposing hybrid search and RAG chat over the Swiss federal law c
 
 1. Postgres with pgvector, running and embedded: `docker compose up -d` (from repo root), then `ingest embed` from `apps/ingestion` — see [`apps/ingestion/README.md`](../ingestion/README.md).
 2. Ollama running with the embedding and chat models pulled: `ollama pull bge-m3`, `ollama pull qwen3:4b`, then `ollama serve` (or the desktop app).
-3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`.
+3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`, `INGESTION_PYTHON` (optional: path to ingestion venv, auto-derived from `apps/ingestion/.venv` when unset).
 
 ## Setup
 
@@ -117,7 +117,7 @@ The response is `text/event-stream` with four event types, in order:
 | Event    | When                          | Payload                                                       |
 | -------- | ------------------------------ | -------------------------------------------------------------- |
 | `sources`| once, before generation starts | `{ "sources": [ { "sr", "article", "heading", "eli", "lang", "score" }, ... ] }` |
-| `token`  | once per generated token/delta | `{ "delta": "<text fragment>" }`                                |
+| `token`  | once per generated token/delta | `{ "delta": "<text fragment>" }` — may be empty: heartbeats keep the stream cancellable while the model is reasoning |
 | `done`   | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
 | `error`  | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
 
@@ -142,6 +142,24 @@ data: {"citations": [{"raw": "[SR 220 Art. 335c]", "sr": "220", "article": "335c
 Every answer cites its sources inline as `[SR <nr> Art. <x>]`; the `done` event resolves each citation back to its retrieved source (`resolved: true`) or flags it as unresolved (`resolved: false`) if the model cited something outside the retrieved articles. If the retrieved articles don't answer the question, the model is instructed to say so and refuses to answer rather than cite anything.
 
 Retrieval failures (Ollama embeddings or Postgres unreachable) happen before any bytes stream and return a plain `503`, matching `/search`. Generation failures (Ollama chat unreachable or erroring mid-stream) happen after the response has already started streaming, so they surface as an `error` event instead.
+
+Hybrid-reasoning chat models' leaked reasoning (up to and including a trailing `</think>` marker) is stripped server-side before streaming and citation extraction; a stream that never emits the marker is delivered as a single flush at the end.
+
+### `POST /ingest`, `GET /ingest/status`, `GET /ingest/progress`
+
+Runs the ingestion pipeline (`resolve → fetch → parse → embed`) as a background
+subprocess of `apps/ingestion`'s venv, one run at a time.
+
+- `GET /ingest/status` → `{"running", "phase", "acts", "chunks_total", "chunks_embedded"}` —
+  counts come from `data/` and the `chunks` table (0 when Postgres is down, so the
+  desktop panel renders before `docker compose up`).
+- `POST /ingest` → `202 {"status": "started"}`, or `409` while a run is active.
+- `GET /ingest/progress` → SSE (`progress` ~1/s with `{"phase", "done", "total"}`,
+  then terminal `done` or `error`). Connecting while idle returns a snapshot and
+  ends immediately.
+
+Set `INGESTION_PYTHON` in `.env` if the ingestion venv lives outside the default
+`apps/ingestion/.venv` layout.
 
 ## Tests
 

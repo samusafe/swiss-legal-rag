@@ -10,7 +10,7 @@ describe("Composer", () => {
     const onSend = vi.fn();
     render(
       <HeroUIProvider>
-        <Composer disabled={false} offline={false} onSend={onSend} />
+        <Composer disabled={false} offline={false} streaming={false} onSend={onSend} onStop={vi.fn()} />
       </HeroUIProvider>,
     );
 
@@ -27,7 +27,7 @@ describe("Composer", () => {
     const onSend = vi.fn();
     render(
       <HeroUIProvider>
-        <Composer disabled={false} offline={false} onSend={onSend} />
+        <Composer disabled={false} offline={false} streaming={false} onSend={onSend} onStop={vi.fn()} />
       </HeroUIProvider>,
     );
 
@@ -41,7 +41,7 @@ describe("Composer", () => {
     const onSend = vi.fn();
     render(
       <HeroUIProvider>
-        <Composer disabled={false} offline={false} onSend={onSend} />
+        <Composer disabled={false} offline={false} streaming={false} onSend={onSend} onStop={vi.fn()} />
       </HeroUIProvider>,
     );
 
@@ -55,7 +55,7 @@ describe("Composer", () => {
     const onSend = vi.fn();
     render(
       <HeroUIProvider>
-        <Composer disabled={false} offline={false} onSend={onSend} />
+        <Composer disabled={false} offline={false} streaming={false} onSend={onSend} onStop={vi.fn()} />
       </HeroUIProvider>,
     );
 
@@ -70,7 +70,7 @@ describe("Composer", () => {
     const onSend = vi.fn();
     render(
       <HeroUIProvider>
-        <Composer disabled={true} offline={false} onSend={onSend} />
+        <Composer disabled={true} offline={false} streaming={false} onSend={onSend} onStop={vi.fn()} />
       </HeroUIProvider>,
     );
 
@@ -80,5 +80,42 @@ describe("Composer", () => {
     await user.click(button);
 
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("shows Stop instead of Send while streaming and calls onStop", async () => {
+    const user = userEvent.setup();
+    const onStop = vi.fn();
+    render(
+      <HeroUIProvider>
+        <Composer
+          disabled={true}
+          offline={false}
+          streaming={true}
+          onSend={vi.fn()}
+          onStop={onStop}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("shows Send when not streaming", () => {
+    render(
+      <HeroUIProvider>
+        <Composer
+          disabled={false}
+          offline={false}
+          streaming={false}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ class Settings:
     embedding_model: str
     reranker_model: str
     chat_model: str
+    ingestion_python: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -23,4 +24,5 @@ class Settings:
             embedding_model=os.environ.get("EMBEDDING_MODEL", "bge-m3"),
             reranker_model=os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
             chat_model=os.environ.get("OLLAMA_CHAT_MODEL", "qwen3:4b"),
+            ingestion_python=os.environ.get("INGESTION_PYTHON", ""),
         )

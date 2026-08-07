@@ -54,6 +54,30 @@ async function errorDetail(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+async function* sseEvents<T>(
+  response: Response,
+  toEvent: (frame: SseFrame) => T,
+): AsyncGenerator<T> {
+  if (response.body === null) throw new Error("SSE response has no body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parse = createSseParser();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const frame of parse(decoder.decode(value, { stream: true }))) {
+        yield toEvent(frame);
+      }
+    }
+    for (const frame of parse(decoder.decode())) {
+      yield toEvent(frame);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 // Casts below are the backend boundary: payload shapes are owned and
 // tested by apps/retrieval (see its /chat contract).
 function toChatEvent(frame: SseFrame): ChatEvent {
@@ -91,23 +115,76 @@ export async function* postChat(
     signal,
   });
   if (!response.ok) throw new Error(await errorDetail(response));
-  if (response.body === null) throw new Error("chat response has no body");
+  yield* sseEvents(response, toChatEvent);
+}
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const parse = createSseParser();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const frame of parse(decoder.decode(value, { stream: true }))) {
-        yield toChatEvent(frame);
-      }
+export interface IngestStatus {
+  running: boolean;
+  phase: string | null;
+  acts: number;
+  chunksTotal: number;
+  chunksEmbedded: number;
+}
+
+export type IngestEvent =
+  | { type: "progress"; phase: string; done: number; total: number }
+  | { type: "done"; chunksEmbedded: number }
+  | { type: "error"; detail: string };
+
+export async function getIngestStatus(): Promise<IngestStatus> {
+  const response = await fetch(`${API_BASE_URL}/ingest/status`);
+  if (!response.ok) throw new Error(await errorDetail(response));
+  // Backend boundary cast: payload shape owned and tested by apps/retrieval.
+  const data = (await response.json()) as {
+    running: boolean;
+    phase: string | null;
+    acts: number;
+    chunks_total: number;
+    chunks_embedded: number;
+  };
+  return {
+    running: data.running,
+    phase: data.phase,
+    acts: data.acts,
+    chunksTotal: data.chunks_total,
+    chunksEmbedded: data.chunks_embedded,
+  };
+}
+
+export async function postIngest(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/ingest`, { method: "POST" });
+  if (!response.ok) throw new Error(await errorDetail(response));
+}
+
+// Backend boundary casts, same contract note as toChatEvent.
+function toIngestEvent(frame: SseFrame): IngestEvent {
+  const data: unknown = JSON.parse(frame.data);
+  switch (frame.event) {
+    case "progress": {
+      const progress = data as { phase: string; done: number; total: number };
+      return {
+        type: "progress",
+        phase: progress.phase,
+        done: progress.done,
+        total: progress.total,
+      };
     }
-    for (const frame of parse(decoder.decode())) {
-      yield toChatEvent(frame);
-    }
-  } finally {
-    reader.releaseLock();
+    case "done":
+      return {
+        type: "done",
+        chunksEmbedded: (data as { chunks_embedded: number }).chunks_embedded,
+      };
+    case "error":
+      return { type: "error", detail: (data as { detail: string }).detail };
+    default:
+      throw new Error(`unknown SSE event: ${frame.event}`);
   }
+}
+
+export async function* streamIngestProgress(
+  signal: AbortSignal,
+): AsyncGenerator<IngestEvent> {
+  const response = await fetch(`${API_BASE_URL}/ingest/progress`, { signal });
+  if (!response.ok) throw new Error(await errorDetail(response));
+  yield* sseEvents(response, toIngestEvent);
 }

@@ -1,10 +1,11 @@
 import { HeroUIProvider } from "@heroui/react";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MessageList } from "./MessageList";
 
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: vi.fn(),
+vi.mock("../lib/open", () => ({
+  openExternal: vi.fn(),
 }));
 
 const RESOLVED = {
@@ -35,6 +36,10 @@ describe("MessageList", () => {
               error: null,
             },
           ]}
+          streaming={false}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
         />
       </HeroUIProvider>,
     );
@@ -52,6 +57,10 @@ describe("MessageList", () => {
             { role: "user", text: "Frage?", citations: [], error: null },
             { role: "assistant", text: "Antwort.", citations: [], error: null },
           ]}
+          streaming={false}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
         />
       </HeroUIProvider>,
     );
@@ -65,10 +74,110 @@ describe("MessageList", () => {
       <HeroUIProvider>
         <MessageList
           messages={[{ role: "assistant", text: "partial", citations: [], error: "ollama down" }]}
+          streaming={false}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
         />
       </HeroUIProvider>,
     );
 
     expect(screen.getByText("ollama down")).toBeInTheDocument();
+  });
+
+  it("shows the searching indicator in an empty streaming bubble", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            { role: "user", text: "q", citations: [], error: null },
+            { role: "assistant", text: "", citations: [], error: null },
+          ]}
+          streaming={true}
+          searching={true}
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument();
+    expect(screen.getByText("Searching articles…")).toBeInTheDocument();
+  });
+
+  it("switches the caption to Thinking… once sources arrived", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[{ role: "assistant", text: "", citations: [], error: null }]}
+          streaming={true}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+  });
+
+  it("hides the thinking indicator once the last assistant message has text while streaming", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[{ role: "assistant", text: "Ein Monat", citations: [], error: null }]}
+          streaming={true}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+  });
+
+  it("renders the stopped note and no indicator once text streamed", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            { role: "assistant", text: "Partial ", citations: [], error: null, stopped: true },
+          ]}
+          streaming={false}
+          searching={false}
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByText("stopped")).toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+  });
+
+  it("selects an assistant bubble on click and marks it pressed", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            { role: "user", text: "q", citations: [], error: null },
+            { role: "assistant", text: "Antwort.", citations: [], error: null },
+          ]}
+          streaming={false}
+          searching={false}
+          selectedIndex={1}
+          onSelect={onSelect}
+        />
+      </HeroUIProvider>,
+    );
+
+    const bubble = screen.getByRole("button", { pressed: true });
+    expect(bubble).toHaveTextContent("Antwort.");
+    await user.click(bubble);
+    expect(onSelect).toHaveBeenCalledWith(1);
+    expect(screen.getByText("q")).not.toHaveAttribute("role");
   });
 });

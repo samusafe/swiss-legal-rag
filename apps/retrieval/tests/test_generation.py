@@ -32,7 +32,7 @@ def test_build_messages_rejects_unknown_lang() -> None:
         build_messages("q", "en", [])
 
 
-def test_stream_chat_yields_deltas_until_done() -> None:
+def test_stream_chat_yields_markerless_stream_as_one_flush() -> None:
     body = (
         b'{"message":{"content":"Ein "},"done":false}\n'
         b'{"message":{"content":"Monat. [SR 220 Art. 335c]"},"done":false}\n'
@@ -44,7 +44,7 @@ def test_stream_chat_yields_deltas_until_done() -> None:
         return httpx.Response(200, content=body)
 
     deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
-    assert deltas == ["Ein ", "Monat. [SR 220 Art. 335c]"]
+    assert deltas == ["", "", "Ein Monat. [SR 220 Art. 335c]"]
 
 
 def test_stream_chat_raises_runtime_error_when_ollama_unreachable() -> None:
@@ -84,3 +84,34 @@ def test_stream_chat_raises_runtime_error_on_malformed_line() -> None:
 
     with pytest.raises(RuntimeError, match="unexpected payload"):
         list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+
+
+def test_stream_chat_drops_reasoning_before_the_think_marker() -> None:
+    body = (
+        b'{"message":{"content":"Okay, the user wants a greeting."},"done":false}\n'
+        b'{"message":{"content":"\\n</th"},"done":false}\n'
+        b'{"message":{"content":"ink>\\n\\nhi"},"done":false}\n'
+        b'{"message":{"content":" there"},"done":false}\n'
+        b'{"message":{"content":""},"done":true}\n'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert deltas == ["", "", "hi", " there"]
+
+
+def test_stream_chat_streams_incrementally_after_the_think_marker() -> None:
+    body = (
+        b'{"message":{"content":"reasoning</think>"},"done":false}\n'
+        b'{"message":{"content":"Ein "},"done":false}\n'
+        b'{"message":{"content":"Monat."},"done":false}\n'
+        b'{"message":{"content":""},"done":true}\n'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert deltas == ["Ein ", "Monat."]

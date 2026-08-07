@@ -40,6 +40,13 @@ def test_health_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_desktop_webview_origins() -> None:
+    with _client(deps_with([])) as client:
+        response = client.get("/health", headers={"Origin": "http://localhost:1420"})
+
+    assert response.headers["access-control-allow-origin"] == "http://localhost:1420"
+
+
 def test_search_returns_503_when_ollama_unreachable() -> None:
     def failing_embed(text: str) -> list[float]:
         raise RuntimeError("Ollama down")

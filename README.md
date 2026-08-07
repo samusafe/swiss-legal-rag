@@ -16,7 +16,8 @@ Swiss federal law is published in three official languages, and the binding vers
 apps/
 ├── desktop/      Tauri 2 + React chat UI — SSE streaming, citation chips to Fedlex, DE/FR/IT; can also trigger corpus ingestion with live progress
 ├── retrieval/    FastAPI — hybrid search (pgvector + Postgres FTS, RRF) → cross-encoder rerank → RAG with SSE
-└── ingestion/    Python CLI — Fedlex SPARQL → Akoma Ntoso XML → 1 article = 1 chunk → embed → index
+├── ingestion/    Python CLI — Fedlex SPARQL → Akoma Ntoso XML → 1 article = 1 chunk → embed → index
+└── evals/        Gold Q&A dataset (DE/FR/IT) + LLM-assisted drafting CLI + retrieval/citation/refusal scoring
 db/init/          pgvector bootstrap SQL
 corpus.yaml       The corpus manifest: ~10 federal acts × 3 languages
 ```
@@ -42,6 +43,20 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 - **Federal law only.** Switzerland has three legislative levels — federal, cantonal (26 cantons, each with its own collection), and communal. This project covers the federal level (Fedlex). Cantonal questions are **refused by design** rather than answered without sources — refusal accuracy is part of the eval suite. Cantonal law has no uniform structured API comparable to Fedlex SPARQL/Akoma Ntoso, so supporting it would be a per-canton effort (possible future work for cantons with structured data).
 - **Question languages.** Official evaluation targets DE/FR/IT. The embedding model (BGE-M3) is cross-lingual, so questions in other languages (e.g. EN, PT) are planned as a future addition — answers would follow the question language, while citations always point to the official DE/FR/IT texts, which alone are legally binding. Note: the full-text half of hybrid search only covers DE/FR/IT, so other input languages rely mostly on dense retrieval.
 
+## Evaluation
+
+`apps/evals` scores the retrieval API against a gold Q&A dataset (German/French/Italian) built
+from the indexed corpus, with a human-curated seed set plus an LLM-assisted drafting workflow for
+growing it. Target scorecard:
+
+| Metric              | Target  |
+| -------------------- | ------- |
+| Retrieval hit rate   | ≥ 0.80  |
+| Keyword recall       | ≥ 0.70  |
+| Refusal accuracy     | ≥ 0.90  |
+
+Scorecard pending the first full run against a fully embedded corpus.
+
 ## Status
 
 | Milestone                                  | State |
@@ -52,7 +67,7 @@ Ingestion, API, and UI instructions land in each `apps/*/README.md` as milestone
 | 3 — Embed + index + hybrid search + rerank | 🟡 code complete* |
 | 4 — `/chat` with citation contract + SSE   | 🟡 code complete* |
 | 5 — Tauri desktop UI                       | 🟡 code complete* |
-| 6 — Gold dataset + eval scorecard          | ⬜    |
+| 6 — Gold dataset + eval scorecard          | 🟡 code complete* |
 | 7 — Polish (diagram, GIF, demo)            | ⬜    |
 
 \* implemented and unit-tested; end-to-end verification against a fully embedded corpus is still pending.

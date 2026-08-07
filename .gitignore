@@ -5,6 +5,7 @@
 
 # Downloaded corpus cache (official Fedlex XML) — re-fetchable, large
 data/
+!apps/evals/data/
 
 # Private project notes — keep out of the public repo for now
 docs/
@@ -29,6 +30,12 @@ out/
 mlruns/
 mlartifacts/
 models/
+
+# Evals run output (regenerable JSON result files)
+apps/evals/results/
+
+# Evals LLM-drafted questions — unverified until a human curates them into gold.jsonl
+apps/evals/data/gold.draft*.jsonl
 
 # Crash dumps (Git Bash / Cygwin)
 *.stackdump

@@ -1,0 +1,19 @@
+// Hand-written seed gold dataset (M6). 3 languages x 3 rows (2 answerable +
+// 1 must-refuse each). Every answerable row's article was verified against
+// the indexed chunks in data/chunks/<sr>/<lang>.jsonl before being added
+// here.
+//
+// Format: one JSON object per line. Fields: id, lang ("de"|"fr"|"it"),
+// question, expected_sources (["SR <nr> Art. <x>", ...]), expected_keywords
+// (2-4 terms in the question's language that a correct answer would
+// contain), must_refuse (bool; true rows use empty expected_sources /
+// expected_keywords and need no source verification).
+{"id": "seed-de-01", "lang": "de", "question": "Wie lange ist die ordentliche Kündigungsfrist im ersten Dienstjahr nach Ablauf der Probezeit?", "expected_sources": ["SR 220 Art. 335c"], "expected_keywords": ["einen Monat", "Kündigungsfrist"], "must_refuse": false}
+{"id": "seed-de-02", "lang": "de", "question": "Ab welchem Alter gilt eine Person in der Schweiz als volljährig?", "expected_sources": ["SR 210 Art. 14"], "expected_keywords": ["18", "volljährig"], "must_refuse": false}
+{"id": "seed-de-03", "lang": "de", "question": "Wie hoch ist der Steuersatz der Kantonssteuer im Kanton Zürich für ein Einkommen über 100'000 Franken?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "seed-fr-01", "lang": "fr", "question": "Quel est le délai de congé applicable pendant la première année de service, une fois le temps d'essai écoulé ?", "expected_sources": ["SR 220 Art. 335c"], "expected_keywords": ["un mois", "délai de congé"], "must_refuse": false}
+{"id": "seed-fr-02", "lang": "fr", "question": "À quelles conditions une personne est-elle tenue de réparer un dommage causé de manière illicite à autrui ?", "expected_sources": ["SR 220 Art. 41"], "expected_keywords": ["dommage", "illicite"], "must_refuse": false}
+{"id": "seed-fr-03", "lang": "fr", "question": "Quel médicament dois-je prendre pour soigner une grippe ?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "seed-it-01", "lang": "it", "question": "A quale età una persona diventa maggiorenne in Svizzera?", "expected_sources": ["SR 210 Art. 14"], "expected_keywords": ["18", "maggiorenne"], "must_refuse": false}
+{"id": "seed-it-02", "lang": "it", "question": "Quali sono i presupposti per l'obbligo di risarcire un danno causato illecitamente ad altri?", "expected_sources": ["SR 220 Art. 41"], "expected_keywords": ["danno", "illecitamente"], "must_refuse": false}
+{"id": "seed-it-03", "lang": "it", "question": "Quali sono gli orari scolastici delle scuole elementari nel Cantone Ticino?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}

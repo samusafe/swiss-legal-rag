@@ -1,7 +1,5 @@
 import { createSseParser, type SseFrame } from "./sse";
 
-export type Lang = "de" | "fr" | "it";
-
 export interface Source {
   sr: string;
   article: string;
@@ -21,6 +19,7 @@ export interface Citation {
 
 export type ChatEvent =
   | { type: "sources"; sources: Source[] }
+  | { type: "thinking"; delta: string }
   | { type: "token"; delta: string }
   | { type: "done"; citations: Citation[]; model: string; durationMs: number }
   | { type: "error"; detail: string };
@@ -85,6 +84,8 @@ function toChatEvent(frame: SseFrame): ChatEvent {
   switch (frame.event) {
     case "sources":
       return { type: "sources", sources: (data as { sources: Source[] }).sources };
+    case "thinking":
+      return { type: "thinking", delta: (data as { delta: string }).delta };
     case "token":
       return { type: "token", delta: (data as { delta: string }).delta };
     case "done": {
@@ -105,13 +106,12 @@ function toChatEvent(frame: SseFrame): ChatEvent {
 
 export async function* postChat(
   question: string,
-  lang: Lang,
   signal: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, lang }),
+    body: JSON.stringify({ question }),
     signal,
   });
   if (!response.ok) throw new Error(await errorDetail(response));

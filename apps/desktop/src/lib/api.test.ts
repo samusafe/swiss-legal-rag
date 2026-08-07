@@ -17,7 +17,7 @@ function sseResponse(text: string): Response {
 
 async function collect(question = "q"): Promise<ChatEvent[]> {
   const events: ChatEvent[] = [];
-  for await (const event of postChat(question, "de", new AbortController().signal)) {
+  for await (const event of postChat(question, new AbortController().signal)) {
     events.push(event);
   }
   return events;
@@ -28,9 +28,10 @@ afterEach(() => {
 });
 
 describe("postChat", () => {
-  it("yields sources, token and done events in order", async () => {
+  it("yields sources, thinking, token and done events in order", async () => {
     const body =
       'event: sources\ndata: {"sources": [{"sr": "220", "article": "335c", "heading": "h", "eli": "https://example.test/e", "lang": "de", "score": 6.9}]}\n\n' +
+      'event: thinking\ndata: {"delta": "checking Art. 335c… "}\n\n' +
       'event: token\ndata: {"delta": "Hallo"}\n\n' +
       'event: done\ndata: {"citations": [], "model": "qwen3:4b", "duration_ms": 12}\n\n';
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(body)));
@@ -42,12 +43,13 @@ describe("postChat", () => {
           { sr: "220", article: "335c", heading: "h", eli: "https://example.test/e", lang: "de", score: 6.9 },
         ],
       },
+      { type: "thinking", delta: "checking Art. 335c… " },
       { type: "token", delta: "Hallo" },
       { type: "done", citations: [], model: "qwen3:4b", durationMs: 12 },
     ]);
   });
 
-  it("posts question and lang (no k) to /chat", async () => {
+  it("posts only the question to /chat", async () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(""));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -57,7 +59,7 @@ describe("postChat", () => {
       "http://localhost:8000/chat",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ question: "Kündigungsfrist?", lang: "de" }),
+        body: JSON.stringify({ question: "Kündigungsfrist?" }),
       }),
     );
   });

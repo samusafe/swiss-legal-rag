@@ -69,6 +69,35 @@ def test_chat_posts_question_and_assembles_answer_and_citations():
     assert citations == [citation]
 
 
+def test_chat_tolerates_unknown_thinking_event_between_sources_and_token():
+    citation = {
+        "raw": "[SR 220 Art. 1]",
+        "sr": "220",
+        "article": "1",
+        "eli": "https://example.org/eli",
+        "resolved": True,
+    }
+    body = _sse_body(
+        [
+            ("sources", {"sources": [{"sr": "220"}]}),
+            ("thinking", {"delta": "hmm, checking the article..."}),
+            ("token", {"delta": "Hello "}),
+            ("token", {"delta": "world"}),
+            ("done", {"citations": [citation], "model": "m", "duration_ms": 5}),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        answer, citations = chat(http_client, "http://test", "frage", "de", 5)
+
+    assert answer == "Hello world"
+    assert citations == [citation]
+
+
 def test_chat_raises_runtime_error_on_error_event():
     body = _sse_body(
         [

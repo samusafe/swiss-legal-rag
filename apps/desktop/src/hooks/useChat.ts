@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { postChat } from "../lib/api";
-import type { Citation, Lang, Source } from "../lib/api";
+import type { Citation, Source } from "../lib/api";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -23,7 +23,7 @@ function updateLast(
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
-  const [lang, setLang] = useState<Lang>("de");
+  const [thinking, setThinking] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -37,6 +37,7 @@ export function useChat() {
       abortRef.current = controller;
       setBanner(null);
       setSources([]);
+      setThinking("");
       setStreaming(true);
       setMessages((prev) => [
         ...prev,
@@ -44,7 +45,7 @@ export function useChat() {
         { role: "assistant", text: "", citations: [], error: null },
       ]);
       try {
-        for await (const event of postChat(question, lang, controller.signal)) {
+        for await (const event of postChat(question, controller.signal)) {
           switch (event.type) {
             case "sources":
               setSources(event.sources);
@@ -52,7 +53,11 @@ export function useChat() {
                 updateLast(prev, (m) => ({ ...m, sources: event.sources })),
               );
               break;
+            case "thinking":
+              setThinking((prev) => prev + event.delta);
+              break;
             case "token":
+              setThinking("");
               setMessages((prev) =>
                 updateLast(prev, (m) => ({ ...m, text: m.text + event.delta })),
               );
@@ -91,12 +96,12 @@ export function useChat() {
         abortRef.current = null;
       }
     },
-    [lang],
+    [],
   );
 
   const stop = useCallback((): void => {
     abortRef.current?.abort();
   }, []);
 
-  return { messages, sources, lang, setLang, streaming, banner, send, stop };
+  return { messages, sources, thinking, streaming, banner, send, stop };
 }

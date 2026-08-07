@@ -119,18 +119,61 @@ describe("useChat", () => {
     expect(result.current.streaming).toBe(false);
   });
 
-  it("passes the selected lang to postChat", async () => {
+  it("calls postChat with only the question and an abort signal", async () => {
     postChatMock.mockReturnValue(events([]));
     const { result } = renderHook(() => useChat());
 
-    act(() => {
-      result.current.setLang("fr");
-    });
     await act(async () => {
       await result.current.send("q");
     });
 
-    expect(postChatMock).toHaveBeenCalledWith("q", "fr", expect.any(AbortSignal));
+    expect(postChatMock).toHaveBeenCalledWith("q", expect.any(AbortSignal));
+  });
+
+  it("accumulates thinking deltas into a transient reasoning string, cleared once tokens start", async () => {
+    let resolveThinking: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* (_question: string, _signal: AbortSignal) {
+      yield { type: "thinking", delta: "checking Art. 335c… " } as const;
+      yield { type: "thinking", delta: "one month notice." } as const;
+      await new Promise<void>((resolve) => {
+        resolveThinking = resolve;
+      });
+      yield { type: "token", delta: "Ein Monat" } as const;
+    });
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() =>
+      expect(result.current.thinking).toBe("checking Art. 335c… one month notice."),
+    );
+
+    act(() => resolveThinking?.());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.thinking).toBe("");
+  });
+
+  it("clears thinking when a new send starts", async () => {
+    postChatMock.mockReturnValueOnce(
+      events([{ type: "thinking", delta: "reasoning…" } as ChatEvent]),
+    );
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.send("one");
+    });
+    expect(result.current.thinking).toBe("reasoning…");
+
+    postChatMock.mockReturnValueOnce(events([]));
+    await act(async () => {
+      await result.current.send("two");
+    });
+
+    expect(result.current.thinking).toBe("");
   });
 
   it("clears sources when a new send starts", async () => {
@@ -195,11 +238,7 @@ describe("useChat", () => {
   });
 
   it("stop() keeps the partial text, marks it stopped and shows no banner", async () => {
-    postChatMock.mockImplementation(async function* (
-      _question: string,
-      _lang: "de" | "fr" | "it",
-      signal: AbortSignal,
-    ) {
+    postChatMock.mockImplementation(async function* (_question: string, signal: AbortSignal) {
       yield { type: "token", delta: "Partial " } as const;
       await new Promise<never>((_, reject) => {
         signal.addEventListener("abort", () => reject(new Error("aborted")));

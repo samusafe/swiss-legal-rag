@@ -10,7 +10,7 @@ import { useIngest } from "./hooks/useIngest";
 
 export default function App() {
   const online = useHealth();
-  const { messages, sources, lang, setLang, streaming, banner, send, stop } = useChat();
+  const { messages, sources, thinking, streaming, banner, send, stop } = useChat();
   const ingest = useIngest();
   const [corpusOpen, setCorpusOpen] = useState(false);
 
@@ -36,8 +36,6 @@ export default function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       <Header
         online={online}
-        lang={lang}
-        onLangChange={setLang}
         ingestPercent={ingestPercent}
         onOpenCorpus={() => setCorpusOpen(true)}
       />
@@ -57,6 +55,7 @@ export default function App() {
             messages={messages}
             streaming={streaming}
             searching={sources.length === 0}
+            thinking={thinking}
             selectedIndex={selectedIndex}
             onSelect={(i) => setSelectedIndex((prev) => (prev === i ? null : i))}
           />

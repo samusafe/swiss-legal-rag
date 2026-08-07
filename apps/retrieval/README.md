@@ -103,7 +103,14 @@ Request:
 { "question": "Welche Kündigungsfrist gilt im ersten Dienstjahr?", "lang": "de", "k": 5 }
 ```
 
-- `lang` — one of `de`, `fr`, `it` (both the FTS query language and the language the answer is generated in).
+- `lang` — optional, one of `de`, `fr`, `it` (both the FTS query language and the language the
+  answer is generated in). Omit it (or pass `null`) to let the server detect the question's
+  language automatically:
+  - The answer is generated in the detected language (any language `langdetect` recognizes with
+    ≥70% confidence), falling back to English if detection is inconclusive.
+  - Full-text search uses the detected language only when it's `de`, `fr`, or `it` — for any other
+    detected (or undetected) language, `/chat` retrieves with dense search + rerank only (no FTS
+    arm), since there's no FTS configuration to query with.
 - `k` — number of retrieved articles to ground the answer in (default 5, min 1, max 20).
 
 ```
@@ -112,14 +119,19 @@ curl -N -X POST http://localhost:8000/chat \
   -d '{"question": "Welche Kündigungsfrist gilt im ersten Dienstjahr?", "lang": "de"}'
 ```
 
-The response is `text/event-stream` with four event types, in order:
+The response is `text/event-stream` with up to five event types, in order:
 
-| Event    | When                          | Payload                                                       |
-| -------- | ------------------------------ | -------------------------------------------------------------- |
-| `sources`| once, before generation starts | `{ "sources": [ { "sr", "article", "heading", "eli", "lang", "score" }, ... ] }` |
-| `token`  | once per generated token/delta | `{ "delta": "<text fragment>" }` — may be empty: heartbeats keep the stream cancellable while the model is reasoning |
-| `done`   | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
-| `error`  | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
+| Event     | When                          | Payload                                                       |
+| --------- | ------------------------------ | -------------------------------------------------------------- |
+| `sources` | once, before generation starts | `{ "sources": [ { "sr", "article", "heading", "eli", "lang", "score" }, ... ] }` |
+| `thinking`| zero or more, before the answer, if the model reasons before answering | `{ "delta": "<reasoning fragment>" }` |
+| `token`   | once per generated answer token/delta | `{ "delta": "<text fragment>" }` — may be empty: heartbeats keep the stream cancellable while the model's reasoning is still ambiguous |
+| `done`    | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
+| `error`   | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
+
+`thinking` events carry the model's reasoning (for hybrid-reasoning models that emit a
+`<think>…</think>` block) so a client can show it separately from the final answer; clients that
+don't care about it can simply ignore events they don't recognize.
 
 `duration_ms` covers generation only — retrieval (embed, search, rerank) runs before the stream starts and is not included.
 
@@ -128,6 +140,9 @@ Example stream (abridged):
 ```
 event: sources
 data: {"sources": [{"sr": "220", "article": "335c", "heading": "nach Ablauf der Probezeit", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "lang": "de", "score": 6.87}]}
+
+event: thinking
+data: {"delta": "The user is asking about the notice period in the first year..."}
 
 event: token
 data: {"delta": "Im ersten Dienstjahr gilt "}
@@ -143,7 +158,10 @@ Every answer cites its sources inline as `[SR <nr> Art. <x>]`; the `done` event 
 
 Retrieval failures (Ollama embeddings or Postgres unreachable) happen before any bytes stream and return a plain `503`, matching `/search`. Generation failures (Ollama chat unreachable or erroring mid-stream) happen after the response has already started streaming, so they surface as an `error` event instead.
 
-Hybrid-reasoning chat models' leaked reasoning (up to and including a trailing `</think>` marker) is stripped server-side before streaming and citation extraction; a stream that never emits the marker is delivered as a single flush at the end.
+Hybrid-reasoning chat models' `<think>…</think>` reasoning is separated server-side from the
+answer and forwarded as `thinking` events (never mixed into citation extraction, which only sees
+`token` deltas); a stream that never emits a `</think>` marker is delivered as a single `token`
+flush at the end.
 
 ### `POST /ingest`, `GET /ingest/status`, `GET /ingest/progress`
 

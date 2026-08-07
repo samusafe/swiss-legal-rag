@@ -23,6 +23,7 @@ from retrieval.ingest import (
     phase_progress,
     start_ingest,
 )
+from retrieval.language import answer_language, detect_language, fts_language
 from retrieval.models import ChatRequest, SearchRequest, SearchResponse
 from retrieval.rerank import Reranker
 from retrieval.search import SearchDeps, run_search
@@ -104,7 +105,7 @@ def create_app() -> FastAPI:
         try:
             if app.state.deps is None:  # dropped after a DB failure — reconnect now
                 _connect_deps(app)
-            return run_search(app.state.deps, request)
+            return run_search(app.state.deps, request.q, request.k, request.lang)
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except psycopg.Error as error:
@@ -121,13 +122,13 @@ def create_app() -> FastAPI:
 
     @app.post("/chat")
     def chat(request: ChatRequest) -> StreamingResponse:
+        detected = None if request.lang is not None else detect_language(request.question)
+        fts_lang = fts_language(request.lang, detected)
+        language = answer_language(request.lang, detected)
         try:
             if app.state.deps is None:
                 _connect_deps(app)
-            search_response = run_search(
-                app.state.deps,
-                SearchRequest(q=request.question, lang=request.lang, k=request.k),
-            )
+            search_response = run_search(app.state.deps, request.question, request.k, fts_lang)
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except psycopg.Error as error:
@@ -145,7 +146,7 @@ def create_app() -> FastAPI:
             app.state.client = httpx.Client(timeout=60.0)
         client = app.state.client
         sources = search_response.results
-        messages = build_messages(request.question, request.lang, sources)
+        messages = build_messages(request.question, language, sources)
 
         def events() -> Iterator[str]:
             yield _sse(
@@ -155,9 +156,12 @@ def create_app() -> FastAPI:
             t0 = time.perf_counter()
             parts: list[str] = []
             try:
-                for delta in stream_chat(
+                for kind, delta in stream_chat(
                     client, settings.ollama_base_url, settings.chat_model, messages
                 ):
+                    if kind == "thinking":
+                        yield _sse("thinking", {"delta": delta})
+                        continue
                     parts.append(delta)
                     yield _sse("token", {"delta": delta})
             except Exception as error:

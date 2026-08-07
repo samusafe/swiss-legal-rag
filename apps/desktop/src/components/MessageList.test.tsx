@@ -38,6 +38,7 @@ describe("MessageList", () => {
           ]}
           streaming={false}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -59,6 +60,7 @@ describe("MessageList", () => {
           ]}
           streaming={false}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -76,6 +78,7 @@ describe("MessageList", () => {
           messages={[{ role: "assistant", text: "partial", citations: [], error: "ollama down" }]}
           streaming={false}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -95,6 +98,7 @@ describe("MessageList", () => {
           ]}
           streaming={true}
           searching={true}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -112,6 +116,7 @@ describe("MessageList", () => {
           messages={[{ role: "assistant", text: "", citations: [], error: null }]}
           streaming={true}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -128,6 +133,7 @@ describe("MessageList", () => {
           messages={[{ role: "assistant", text: "Ein Monat", citations: [], error: null }]}
           streaming={true}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -146,6 +152,7 @@ describe("MessageList", () => {
           ]}
           streaming={false}
           searching={false}
+          thinking=""
           selectedIndex={null}
           onSelect={vi.fn()}
         />
@@ -168,6 +175,7 @@ describe("MessageList", () => {
           ]}
           streaming={false}
           searching={false}
+          thinking=""
           selectedIndex={1}
           onSelect={onSelect}
         />
@@ -179,5 +187,83 @@ describe("MessageList", () => {
     await user.click(bubble);
     expect(onSelect).toHaveBeenCalledWith(1);
     expect(screen.getByText("q")).not.toHaveAttribute("role");
+  });
+
+  describe("a11y", () => {
+    it("does not nest the thinking disclosure button inside an interactive bubble while streaming", () => {
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "", citations: [], error: null }]}
+            streaming={true}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+          />
+        </HeroUIProvider>,
+      );
+
+      // Exactly one interactive control in the bubble area: the disclosure toggle.
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+
+      const disclosureToggle = screen.getByTestId("thinking-indicator");
+      const bubble = disclosureToggle.parentElement?.parentElement;
+      expect(bubble).not.toHaveAttribute("role");
+      expect(bubble).not.toHaveAttribute("tabindex");
+    });
+  });
+
+  describe("thinking disclosure", () => {
+    it("is collapsed by default and expands on click to show the streamed reasoning", async () => {
+      const user = userEvent.setup();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[
+              { role: "user", text: "q", citations: [], error: null },
+              { role: "assistant", text: "", citations: [], error: null },
+            ]}
+            streaming={true}
+            searching={false}
+            thinking="checking Art. 335c…"
+            selectedIndex={null}
+            onSelect={vi.fn()}
+          />
+        </HeroUIProvider>,
+      );
+
+      const toggle = screen.getByTestId("thinking-indicator");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("checking Art. 335c…")).not.toBeInTheDocument();
+
+      await user.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("checking Art. 335c…")).toBeInTheDocument();
+    });
+
+    it("shows a placeholder when expanded with no reasoning emitted yet", async () => {
+      const user = userEvent.setup();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[
+              { role: "user", text: "q", citations: [], error: null },
+              { role: "assistant", text: "", citations: [], error: null },
+            ]}
+            streaming={true}
+            searching={true}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+          />
+        </HeroUIProvider>,
+      );
+
+      await user.click(screen.getByTestId("thinking-indicator"));
+
+      expect(screen.getByText("No reasoning emitted by this model.")).toBeInTheDocument();
+    });
   });
 });

@@ -14,7 +14,7 @@ Swiss federal law is published in three official languages, and the binding vers
 
 ```
 apps/
-├── desktop/      Tauri 2 + React chat UI — SSE streaming, citation chips to Fedlex, DE/FR/IT; can also trigger corpus ingestion with live progress
+├── desktop/      Tauri 2 + React chat UI — SSE streaming, citation chips to Fedlex, auto-detected answer language; can also trigger corpus ingestion with live progress
 ├── retrieval/    FastAPI — hybrid search (pgvector + Postgres FTS, RRF) → cross-encoder rerank → RAG with SSE
 ├── ingestion/    Python CLI — Fedlex SPARQL → Akoma Ntoso XML → 1 article = 1 chunk → embed → index
 └── evals/        Gold Q&A dataset (DE/FR/IT) + LLM-assisted drafting CLI + retrieval/citation/refusal scoring

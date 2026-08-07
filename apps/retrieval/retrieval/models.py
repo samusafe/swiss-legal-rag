@@ -12,7 +12,8 @@ class SearchRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1)
-    lang: Literal["de", "fr", "it"]
+    # Optional: omitted or null lets the server detect the question's language.
+    lang: Literal["de", "fr", "it"] | None = None
     k: int = Field(default=5, ge=1, le=20)
 
 

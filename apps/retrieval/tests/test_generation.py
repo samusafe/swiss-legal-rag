@@ -19,7 +19,7 @@ def _source(article: str, context: str | None = None) -> SearchResult:
 
 
 def test_build_messages_labels_articles_and_fixes_answer_language() -> None:
-    messages = build_messages("Quel délai?", "fr", [_source("335c", "OR > Kündigung")])
+    messages = build_messages("Quel délai?", "French", [_source("335c", "OR > Kündigung")])
     assert messages[0]["role"] == "system"
     assert "Answer in French." in messages[0]["content"]
     user = messages[1]["content"]
@@ -27,12 +27,7 @@ def test_build_messages_labels_articles_and_fixes_answer_language() -> None:
     assert user.endswith("Question: Quel délai?")
 
 
-def test_build_messages_rejects_unknown_lang() -> None:
-    with pytest.raises(KeyError):
-        build_messages("q", "en", [])
-
-
-def test_stream_chat_yields_markerless_stream_as_one_flush() -> None:
+def test_stream_chat_yields_only_tokens_for_a_markerless_stream() -> None:
     body = (
         b'{"message":{"content":"Ein "},"done":false}\n'
         b'{"message":{"content":"Monat. [SR 220 Art. 335c]"},"done":false}\n'
@@ -44,7 +39,12 @@ def test_stream_chat_yields_markerless_stream_as_one_flush() -> None:
         return httpx.Response(200, content=body)
 
     deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
-    assert deltas == ["", "", "Ein Monat. [SR 220 Art. 335c]"]
+    assert deltas == [
+        ("token", ""),
+        ("token", ""),
+        ("token", "Ein Monat. [SR 220 Art. 335c]"),
+    ]
+    assert all(kind == "token" for kind, _ in deltas)
 
 
 def test_stream_chat_raises_runtime_error_when_ollama_unreachable() -> None:
@@ -86,7 +86,9 @@ def test_stream_chat_raises_runtime_error_on_malformed_line() -> None:
         list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
 
 
-def test_stream_chat_drops_reasoning_before_the_think_marker() -> None:
+def test_stream_chat_surfaces_reasoning_before_a_split_think_marker() -> None:
+    # "</think>" arrives split across chunks 2/3 with no opening tag (Ollama's
+    # raw-reasoning quirk) — must not leak marker fragments into the answer.
     body = (
         b'{"message":{"content":"Okay, the user wants a greeting."},"done":false}\n'
         b'{"message":{"content":"\\n</th"},"done":false}\n'
@@ -99,7 +101,13 @@ def test_stream_chat_drops_reasoning_before_the_think_marker() -> None:
         return httpx.Response(200, content=body)
 
     deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
-    assert deltas == ["", "", "hi", " there"]
+    assert deltas == [
+        ("token", ""),
+        ("token", ""),
+        ("thinking", "Okay, the user wants a greeting.\n"),
+        ("token", "hi"),
+        ("token", " there"),
+    ]
 
 
 def test_stream_chat_streams_incrementally_after_the_think_marker() -> None:
@@ -114,4 +122,54 @@ def test_stream_chat_streams_incrementally_after_the_think_marker() -> None:
         return httpx.Response(200, content=body)
 
     deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
-    assert deltas == ["Ein ", "Monat."]
+    assert deltas == [
+        ("thinking", "reasoning"),
+        ("token", "Ein "),
+        ("token", "Monat."),
+    ]
+
+
+def test_stream_chat_streams_explicit_think_tag_live_then_token() -> None:
+    body = b'{"message":{"content":"<think>ab</think>cd"},"done":false}\n' b'{"done":true}\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert deltas == [("thinking", "ab"), ("token", "cd")]
+
+
+def test_stream_chat_flushes_unclosed_confirmed_thinking_as_thinking_not_token() -> None:
+    # Confirmed-open "<think>" block never sees "</think>" before the stream
+    # ends — the withheld reasoning fragment must flush as "thinking", never
+    # leak into the answer as "token" (it would pollute citation extraction).
+    body = b'{"message":{"content":"<think>abc"},"done":false}\n' b'{"done":true}\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert deltas, "expected at least one event"
+    assert all(kind == "thinking" for kind, _ in deltas)
+    assert "".join(delta for _, delta in deltas) == "abc"
+
+
+def test_stream_chat_yields_a_heartbeat_per_chunk_during_confirmed_thinking() -> None:
+    # Small deltas that never exceed the "</think>" guard length must still
+    # yield one event per received chunk, so the stream stays cancellable.
+    body = (
+        b'{"message":{"content":"<think>"},"done":false}\n'
+        b'{"message":{"content":"a"},"done":false}\n'
+        b'{"message":{"content":"b"},"done":false}\n'
+        b'{"message":{"content":"c"},"done":false}\n'
+        b'{"done":true}\n'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    deltas = list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert all(kind == "thinking" for kind, _ in deltas)
+    # 4 received chunks -> at least 4 in-loop yields, plus the end-of-stream flush.
+    assert len(deltas) >= 5
+    assert "".join(delta for _, delta in deltas) == "abc"

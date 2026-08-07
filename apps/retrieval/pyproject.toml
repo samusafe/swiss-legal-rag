@@ -12,6 +12,7 @@ dependencies = [
     "pgvector>=0.3",
     "sentence-transformers>=3.0",
     "python-dotenv>=1.0",
+    "langdetect>=1.0.9",
 ]
 
 [project.optional-dependencies]

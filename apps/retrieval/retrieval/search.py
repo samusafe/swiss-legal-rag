@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from retrieval.db import ChunkRow
 from retrieval.fusion import rrf
-from retrieval.models import SearchRequest, SearchResponse, SearchResult
+from retrieval.models import SearchResponse, SearchResult
 
 CANDIDATES = 20
 
@@ -17,12 +17,14 @@ class SearchDeps:
     rerank: Callable[[str, list[str]], list[float]]
 
 
-def run_search(deps: SearchDeps, request: SearchRequest) -> SearchResponse:
+def run_search(deps: SearchDeps, q: str, k: int, lang: str | None) -> SearchResponse:
+    # lang=None skips the FTS arm entirely (dense + rerank only) — used by /chat
+    # when the detected question language isn't one FTS has a config for.
     t0 = time.perf_counter()
-    query_vector = deps.embed(request.q)
+    query_vector = deps.embed(q)
     t1 = time.perf_counter()
     dense_rows = deps.dense(query_vector, CANDIDATES)
-    fts_rows = deps.fts(request.q, request.lang, CANDIDATES)
+    fts_rows = deps.fts(q, lang, CANDIDATES) if lang is not None else []
     by_id = {row.id: row for row in [*dense_rows, *fts_rows]}
     fused_ids = rrf([[r.id for r in dense_rows], [r.id for r in fts_rows]])[:CANDIDATES]
     candidates = [by_id[i] for i in fused_ids]
@@ -38,8 +40,8 @@ def run_search(deps: SearchDeps, request: SearchRequest) -> SearchResponse:
                 "rerank": 0,
             },
         )
-    scores = deps.rerank(request.q, [row.text for row in candidates])
-    ranked = sorted(zip(candidates, scores), key=lambda pair: -pair[1])[: request.k]
+    scores = deps.rerank(q, [row.text for row in candidates])
+    ranked = sorted(zip(candidates, scores), key=lambda pair: -pair[1])[:k]
     t3 = time.perf_counter()
     results = [
         SearchResult(**row.model_dump(exclude={"id"}), score=score) for row, score in ranked

@@ -8,13 +8,7 @@ describe("Header", () => {
   it("reflects online/offline status in the status dot title", () => {
     const { rerender } = render(
       <HeroUIProvider>
-        <Header
-          online={true}
-          lang="de"
-          onLangChange={vi.fn()}
-          ingestPercent={null}
-          onOpenCorpus={vi.fn()}
-        />
+        <Header online={true} ingestPercent={null} onOpenCorpus={vi.fn()} />
       </HeroUIProvider>,
     );
     expect(screen.getByTestId("backend-status")).toHaveAttribute(
@@ -24,13 +18,7 @@ describe("Header", () => {
 
     rerender(
       <HeroUIProvider>
-        <Header
-          online={false}
-          lang="de"
-          onLangChange={vi.fn()}
-          ingestPercent={null}
-          onOpenCorpus={vi.fn()}
-        />
+        <Header online={false} ingestPercent={null} onOpenCorpus={vi.fn()} />
       </HeroUIProvider>,
     );
     expect(screen.getByTestId("backend-status")).toHaveAttribute(
@@ -39,43 +27,15 @@ describe("Header", () => {
     );
   });
 
-  it("calls onLangChange('fr') when the FR tab is clicked", async () => {
-    const user = userEvent.setup();
-    const onLangChange = vi.fn();
+  it("does not render a language switcher", () => {
     render(
       <HeroUIProvider>
-        <Header
-          online={true}
-          lang="de"
-          onLangChange={onLangChange}
-          ingestPercent={null}
-          onOpenCorpus={vi.fn()}
-        />
+        <Header online={true} ingestPercent={null} onOpenCorpus={vi.fn()} />
       </HeroUIProvider>,
     );
 
-    await user.click(screen.getByRole("tab", { name: "FR" }));
-
-    expect(onLangChange).toHaveBeenCalledWith("fr");
-  });
-
-  it("labels the language switcher and explains each language on hover", () => {
-    render(
-      <HeroUIProvider>
-        <Header
-          online={true}
-          lang="de"
-          onLangChange={vi.fn()}
-          ingestPercent={null}
-          onOpenCorpus={vi.fn()}
-        />
-      </HeroUIProvider>,
-    );
-
-    expect(screen.getByText("Answer language")).toBeInTheDocument();
-    expect(screen.getByText("DE")).toHaveAttribute("title", "Deutsch");
-    expect(screen.getByText("FR")).toHaveAttribute("title", "Français");
-    expect(screen.getByText("IT")).toHaveAttribute("title", "Italiano");
+    expect(screen.queryByText("Answer language")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "FR" })).not.toBeInTheDocument();
   });
 });
 
@@ -85,13 +45,7 @@ describe("Header corpus button", () => {
     const onOpenCorpus = vi.fn();
     render(
       <HeroUIProvider>
-        <Header
-          online={true}
-          lang="de"
-          onLangChange={vi.fn()}
-          ingestPercent={null}
-          onOpenCorpus={onOpenCorpus}
-        />
+        <Header online={true} ingestPercent={null} onOpenCorpus={onOpenCorpus} />
       </HeroUIProvider>,
     );
 
@@ -102,13 +56,7 @@ describe("Header corpus button", () => {
   it("shows the embed percentage while a run is active", () => {
     render(
       <HeroUIProvider>
-        <Header
-          online={true}
-          lang="de"
-          onLangChange={vi.fn()}
-          ingestPercent={42}
-          onOpenCorpus={vi.fn()}
-        />
+        <Header online={true} ingestPercent={42} onOpenCorpus={vi.fn()} />
       </HeroUIProvider>,
     );
 

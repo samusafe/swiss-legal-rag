@@ -118,8 +118,8 @@ def _parse_sse(body: str) -> list[tuple[str, dict]]:
 
 def test_chat_streams_sources_tokens_done(monkeypatch) -> None:
     def fake_stream(client, base_url, model, messages):
-        yield "Gamma gilt "
-        yield "[SR 220 Art. 3]."
+        yield ("token", "Gamma gilt ")
+        yield ("token", "[SR 220 Art. 3].")
 
     monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
     app = create_app()
@@ -144,13 +144,32 @@ def test_chat_streams_sources_tokens_done(monkeypatch) -> None:
             "resolved": True,
         }
     ]
-    assert done["model"] == "qwen3:4b"
+    assert done["model"] == app.state.settings.chat_model
     assert isinstance(done["duration_ms"], int)
+
+
+def test_chat_streams_thinking_events_before_tokens(monkeypatch) -> None:
+    def fake_stream(client, base_url, model, messages):
+        yield ("thinking", "hmm, ")
+        yield ("thinking", "let me check")
+        yield ("token", "Gamma gilt.")
+
+    monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        response = client.post("/chat", json={"question": "frage", "lang": "de"})
+
+    events = _parse_sse(response.text)
+    assert [name for name, _ in events] == ["sources", "thinking", "thinking", "token", "done"]
+    assert events[1][1] == {"delta": "hmm, "}
+    assert events[2][1] == {"delta": "let me check"}
+    assert events[3][1] == {"delta": "Gamma gilt."}
 
 
 def test_chat_emits_error_event_when_generation_dies_mid_stream(monkeypatch) -> None:
     def dying_stream(client, base_url, model, messages):
-        yield "Ein "
+        yield ("token", "Ein ")
         raise RuntimeError("Ollama unreachable at http://localhost:11434")
 
     monkeypatch.setattr("retrieval.app.stream_chat", dying_stream)
@@ -162,6 +181,61 @@ def test_chat_emits_error_event_when_generation_dies_mid_stream(monkeypatch) -> 
     events = _parse_sse(response.text)
     assert [name for name, _ in events] == ["sources", "token", "error"]
     assert "Ollama unreachable" in events[-1][1]["detail"]
+
+
+def test_chat_without_lang_detects_language_for_fts_and_prompt(monkeypatch) -> None:
+    captured_messages: list = []
+
+    def fake_build_messages(question, language, sources):
+        captured_messages.append((question, language))
+        return [{"role": "system", "content": "x"}, {"role": "user", "content": "y"}]
+
+    def fake_stream(client, base_url, model, messages):
+        yield ("token", "ok")
+
+    monkeypatch.setattr("retrieval.app.detect_language", lambda text: "de")
+    monkeypatch.setattr("retrieval.app.build_messages", fake_build_messages)
+    monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
+    langs: list[str] = []
+    app = create_app()
+    app.state.deps = deps_with(langs)
+    with TestClient(app) as client:
+        response = client.post("/chat", json={"question": "frage"})
+
+    assert response.status_code == 200
+    assert langs == ["de"]
+    assert captured_messages == [("frage", "German")]
+
+
+def test_chat_without_lang_falls_back_to_dense_only_when_undetected_lang(monkeypatch) -> None:
+    def exploding_fts(q: str, lang: str, k: int) -> list:
+        raise AssertionError("fts must not be called for an unsupported detected language")
+
+    captured_messages: list = []
+
+    def fake_build_messages(question, language, sources):
+        captured_messages.append((question, language))
+        return [{"role": "system", "content": "x"}, {"role": "user", "content": "y"}]
+
+    def fake_stream(client, base_url, model, messages):
+        yield ("token", "ok")
+
+    monkeypatch.setattr("retrieval.app.detect_language", lambda text: "pt")
+    monkeypatch.setattr("retrieval.app.build_messages", fake_build_messages)
+    monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
+    deps = SearchDeps(
+        embed=lambda text: [0.0] * 1024,
+        dense=lambda vector, k: [],
+        fts=exploding_fts,
+        rerank=lambda q, texts: [],
+    )
+    app = create_app()
+    app.state.deps = deps
+    with TestClient(app) as client:
+        response = client.post("/chat", json={"question": "frage"})
+
+    assert response.status_code == 200
+    assert captured_messages == [("frage", "Portuguese")]
 
 
 def test_chat_returns_503_when_retrieval_fails() -> None:
@@ -189,7 +263,7 @@ def test_chat_rejects_unsupported_lang() -> None:
 
 def test_chat_reuses_lazy_httpx_client_across_requests(monkeypatch) -> None:
     def fake_stream(client, base_url, model, messages):
-        yield "ok"
+        yield ("token", "ok")
 
     monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
     app = create_app()

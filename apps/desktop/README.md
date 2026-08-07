@@ -1,6 +1,6 @@
 # desktop
 
-Tauri 2 + Vite + React + Tailwind + HeroUI chat UI over the retrieval API: SSE-streamed answers, citation chips that open the cited Fedlex article in the system browser, DE/FR/IT question-language switcher, and a panel showing the articles retrieved for the latest answer. Talks only to `http://localhost:8000` — never to Postgres directly.
+Tauri 2 + Vite + React + Tailwind + HeroUI chat UI over the retrieval API: SSE-streamed answers, citation chips that open the cited Fedlex article in the system browser, automatic answer-language detection (no language picker — the backend detects the question's language), and a panel showing the articles retrieved for the latest answer. Talks only to `http://localhost:8000` — never to Postgres directly.
 
 ## Prerequisites
 
@@ -39,7 +39,9 @@ pnpm build   # type-check + production bundle
 - The Stop button aborts the in-flight stream and keeps whatever partial answer already
   arrived, marked "stopped".
 - While waiting for a response, a thinking indicator shows "Searching articles…" until the
-  retrieved sources arrive, then "Thinking…" until the first answer token streams in.
+  retrieved sources arrive, then "Thinking…" until the first answer token streams in. Click it
+  to expand the model's streamed reasoning (collapsed by default); the whole indicator
+  disappears once the answer starts streaming.
 - The sources panel always shows the latest answer's results only, one card per article (the
   best-scored part, for articles split across multiple chunks). The relevance bar is scaled
   relative to the other results in that answer's set, not an absolute score — the raw score is

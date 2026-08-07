@@ -5,7 +5,7 @@ FastAPI service exposing hybrid search and RAG chat over the Swiss federal law c
 ## Prerequisites
 
 1. Postgres with pgvector, running and embedded: `docker compose up -d` (from repo root), then `ingest embed` from `apps/ingestion` — see [`apps/ingestion/README.md`](../ingestion/README.md).
-2. Ollama running with the embedding and chat models pulled: `ollama pull bge-m3`, `ollama pull qwen3:4b`, then `ollama serve` (or the desktop app).
+2. Ollama running with the embedding and chat models pulled: `ollama pull bge-m3`, `ollama pull qwen2.5:3b-instruct`, then `ollama serve` (or the desktop app).
 3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`, `INGESTION_PYTHON` (optional: path to ingestion venv, auto-derived from `apps/ingestion/.venv` when unset).
 
 ## Setup
@@ -24,16 +24,31 @@ The reranker (`sentence-transformers` + `torch`) is a ~2 GB download on first in
 Windows:
 
 ```
-.venv\Scripts\python.exe -m uvicorn retrieval.app:app --port 8000
+.venv\Scripts\python.exe -m uvicorn retrieval.app:app --host 127.0.0.1 --port 8000
 ```
 
 Linux/macOS:
 
 ```
-.venv/bin/python -m uvicorn retrieval.app:app --port 8000
+.venv/bin/python -m uvicorn retrieval.app:app --host 127.0.0.1 --port 8000
 ```
 
+`--host 127.0.0.1` binds the API to localhost only — the service is unauthenticated by
+design (see Security below), so it must never listen on a network-reachable interface.
+
 The reranker model loads lazily on the first request to `/search` or `/chat`, so expect that first call to take ~30 s; subsequent calls are fast.
+
+## Security
+
+This service is designed to run entirely on localhost, alongside Postgres and Ollama, for a
+single trusted user (the desktop app on the same machine). It has **no authentication or
+authorization** — anyone who can reach the port can query it and trigger ingestion. Do not
+expose it beyond `127.0.0.1`, and do not put it behind a reverse proxy without adding your own
+auth layer first.
+
+The reranker (`RERANKER_MODEL`, `BAAI/bge-reranker-v2-m3` by default) downloads its weights from
+Hugging Face on first use — a one-time network call the first time `/search` or `/chat` runs
+against a fresh install; after that, everything is local and offline.
 
 ## API
 
@@ -95,7 +110,7 @@ If Ollama is unreachable, `/search` returns `503` with an actionable message nam
 
 ### `POST /chat`
 
-Runs `/search` internally to retrieve the top-`k` articles, then streams a generated answer over Server-Sent Events (SSE). Requires the chat model pulled in Ollama: `ollama pull qwen3:4b` (or set `OLLAMA_CHAT_MODEL` to a different local model).
+Runs `/search` internally to retrieve the top-`k` articles, then streams a generated answer over Server-Sent Events (SSE). Requires the chat model pulled in Ollama: `ollama pull qwen2.5:3b-instruct` (or set `OLLAMA_CHAT_MODEL` to a different local model).
 
 Request:
 
@@ -126,7 +141,7 @@ The response is `text/event-stream` with up to five event types, in order:
 | `sources` | once, before generation starts | `{ "sources": [ { "sr", "article", "heading", "eli", "lang", "score" }, ... ] }` |
 | `thinking`| zero or more, before the answer, if the model reasons before answering | `{ "delta": "<reasoning fragment>" }` |
 | `token`   | once per generated answer token/delta | `{ "delta": "<text fragment>" }` — may be empty: heartbeats keep the stream cancellable while the model's reasoning is still ambiguous |
-| `done`    | once, on successful completion | `{ "citations": [...], "model": "qwen3:4b", "duration_ms": 4213 }` |
+| `done`    | once, on successful completion | `{ "citations": [...], "model": "qwen2.5:3b-instruct", "duration_ms": 4213 }` |
 | `error`   | instead of `done`, if generation fails mid-stream | `{ "detail": "<message>" }`                  |
 
 `thinking` events carry the model's reasoning (for hybrid-reasoning models that emit a
@@ -151,7 +166,7 @@ event: token
 data: {"delta": "eine Kündigungsfrist von einem Monat [SR 220 Art. 335c]."}
 
 event: done
-data: {"citations": [{"raw": "[SR 220 Art. 335c]", "sr": "220", "article": "335c", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "resolved": true}], "model": "qwen3:4b", "duration_ms": 4213}
+data: {"citations": [{"raw": "[SR 220 Art. 335c]", "sr": "220", "article": "335c", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "resolved": true}], "model": "qwen2.5:3b-instruct", "duration_ms": 4213}
 ```
 
 Every answer cites its sources inline as `[SR <nr> Art. <x>]`; the `done` event resolves each citation back to its retrieved source (`resolved: true`) or flags it as unresolved (`resolved: false`) if the model cited something outside the retrieved articles. If the retrieved articles don't answer the question, the model is instructed to say so and refuses to answer rather than cite anything.
@@ -184,4 +199,10 @@ Set `INGESTION_PYTHON` in `.env` if the ingestion venv lives outside the default
 ```
 pytest              # unit tests — offline, no Postgres/Ollama required
 pytest -m db         # database integration tests (auto-skip when Postgres is unreachable)
+ruff check retrieval tests
+mypy retrieval
 ```
+
+The API is intentionally a localhost-only, trusted-user service. `/ingest` starts a local
+subprocess and is not suitable for an internet-facing deployment without authentication,
+authorization, rate limiting, request limits, and a hardened process boundary.

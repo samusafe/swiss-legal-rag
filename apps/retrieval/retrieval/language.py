@@ -43,10 +43,15 @@ def detect_language(text: str) -> str | None:
     return None
 
 
+def answer_language_code(requested: str | None, detected: str | None) -> str:
+    """ISO 639-1 code of the language to answer in — used to resolve citations
+    against the source matching the answer's language (see `citations.py`)."""
+    return requested or detected or "en"
+
+
 def answer_language(requested: str | None, detected: str | None) -> str:
     """English name of the language to answer in, for the system prompt."""
-    code = requested or detected or "en"
-    return _LANGUAGE_NAMES.get(code, "English")
+    return _LANGUAGE_NAMES.get(answer_language_code(requested, detected), "English")
 
 
 def fts_language(requested: str | None, detected: str | None) -> str | None:

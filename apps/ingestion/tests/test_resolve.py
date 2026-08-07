@@ -2,6 +2,7 @@ from datetime import date
 from pathlib import Path
 
 import httpx
+import pytest
 
 from ingestion.corpus import Act, CorpusConfig
 from ingestion.resolve import resolve_corpus
@@ -54,7 +55,7 @@ def test_resolve_corpus_sleeps_between_acts(sparql_client: httpx.Client) -> None
     assert len(manifest.entries) == 6
 
 
-def test_cli_resolve_writes_manifest(tmp_path: Path, monkeypatch) -> None:
+def test_cli_resolve_writes_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from ingestion import cli
     from ingestion.models import Manifest as ManifestModel
 

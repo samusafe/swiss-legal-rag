@@ -9,6 +9,13 @@ from ingestion.models import Chunk, ManifestEntry
 AKN_NS = "http://docs.oasis-open.org/legaldocml/ns/akn/3.0"
 FEDLEX_NS = "http://fedlex.admin.ch/"
 
+# Fedlex XML is fetched from a trusted host, but parse defensively regardless: never
+# substitute entities (blocks XXE file/network disclosure), never load an external DTD,
+# never fetch over the network, and cap tree size against decompression-bomb-style input.
+_XML_PARSER = etree.XMLParser(
+    resolve_entities=False, load_dtd=False, no_network=True, huge_tree=False
+)
+
 _ARTICLE_EID_RE = re.compile(r"^art_(.+)$")
 _ARTICLE_NUMBER_RE = re.compile(r"^(\d+)([a-z]+)?$")
 
@@ -101,7 +108,7 @@ def _split_oversized(text: str) -> list[tuple[int | None, str]]:
 def parse_act(xml_path: Path, entry: ManifestEntry) -> list[Chunk]:
     if not xml_path.exists():
         raise RuntimeError(f"missing raw XML for SR {entry.sr} ({entry.lang}): {xml_path}")
-    root = etree.parse(str(xml_path)).getroot()
+    root = etree.parse(str(xml_path), parser=_XML_PARSER).getroot()
     # Legislative-history footnotes are retrieval noise; drop them tree-wide once.
     etree.strip_elements(root, f"{{{AKN_NS}}}authorialNote", with_tail=False)
     articles = root.findall(f".//{{{AKN_NS}}}article")

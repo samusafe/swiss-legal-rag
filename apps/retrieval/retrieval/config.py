@@ -23,6 +23,6 @@ class Settings:
             ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
             embedding_model=os.environ.get("EMBEDDING_MODEL", "bge-m3"),
             reranker_model=os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
-            chat_model=os.environ.get("OLLAMA_CHAT_MODEL", "qwen3:4b"),
+            chat_model=os.environ.get("OLLAMA_CHAT_MODEL", "qwen2.5:3b-instruct"),
             ingestion_python=os.environ.get("INGESTION_PYTHON", ""),
         )

@@ -1,7 +1,7 @@
-// Hand-written seed gold dataset (M6). 3 languages x 3 rows (2 answerable +
-// 1 must-refuse each). Every answerable row's article was verified against
-// the indexed chunks in data/chunks/<sr>/<lang>.jsonl before being added
-// here.
+// Hand-written gold dataset. 3 languages x 11 rows (8 answerable + 3
+// must-refuse each). Every answerable row's source article was checked against
+// the indexed chunks in data/chunks/<sr>/<lang>.jsonl. Questions and keywords
+// remain human-maintained evaluation targets, not legal advice.
 //
 // Format: one JSON object per line. Fields: id, lang ("de"|"fr"|"it"),
 // question, expected_sources (["SR <nr> Art. <x>", ...]), expected_keywords
@@ -17,3 +17,27 @@
 {"id": "seed-it-01", "lang": "it", "question": "A quale età una persona diventa maggiorenne in Svizzera?", "expected_sources": ["SR 210 Art. 14"], "expected_keywords": ["18", "maggiorenne"], "must_refuse": false}
 {"id": "seed-it-02", "lang": "it", "question": "Quali sono i presupposti per l'obbligo di risarcire un danno causato illecitamente ad altri?", "expected_sources": ["SR 220 Art. 41"], "expected_keywords": ["danno", "illecitamente"], "must_refuse": false}
 {"id": "seed-it-03", "lang": "it", "question": "Quali sono gli orari scolastici delle scuole elementari nel Cantone Ticino?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-de-01", "lang": "de", "question": "Welche Grundsätze gelten nach der Bundesverfassung für die Gleichbehandlung und das Diskriminierungsverbot?", "expected_sources": ["SR 101 Art. 8"], "expected_keywords": ["gleich", "diskriminiert"], "must_refuse": false}
+{"id": "expanded-de-02", "lang": "de", "question": "Wann gilt eine Person nach dem Zivilgesetzbuch als urteilsfähig?", "expected_sources": ["SR 210 Art. 16"], "expected_keywords": ["urteilsfähig", "vernunftgemäss"], "must_refuse": false}
+{"id": "expanded-de-03", "lang": "de", "question": "Wie viele Ferienwochen muss ein Arbeitgeber pro Dienstjahr mindestens gewähren?", "expected_sources": ["SR 220 Art. 329a"], "expected_keywords": ["vier Wochen", "fünf Wochen"], "must_refuse": false}
+{"id": "expanded-de-04", "lang": "de", "question": "Welche Grundsätze gelten für die Bearbeitung von Personendaten nach dem Datenschutzgesetz?", "expected_sources": ["SR 235.1 Art. 6"], "expected_keywords": ["rechtmässig", "verhältnismässig"], "must_refuse": false}
+{"id": "expanded-de-05", "lang": "de", "question": "Welche Voraussetzungen nennt das Strafgesetzbuch für Betrug?", "expected_sources": ["SR 311.0 Art. 146"], "expected_keywords": ["unrechtmässig", "bereichern"], "must_refuse": false}
+{"id": "expanded-de-06", "lang": "de", "question": "Wie hoch ist die wöchentliche Höchstarbeitszeit nach dem Arbeitsgesetz?", "expected_sources": ["SR 822.11 Art. 9"], "expected_keywords": ["45 Stunden", "50 Stunden"], "must_refuse": false}
+{"id": "expanded-de-07", "lang": "de", "question": "Welche Baubewilligung brauche ich für einen privaten Anbau im Kanton Bern?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-de-08", "lang": "de", "question": "Welches Medikament und welche Dosierung soll ich bei einer Grippe einnehmen?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-fr-01", "lang": "fr", "question": "Quels principes la Constitution fédérale pose-t-elle en matière d'égalité et d'interdiction de la discrimination ?", "expected_sources": ["SR 101 Art. 8"], "expected_keywords": ["égaux", "discrimination"], "must_refuse": false}
+{"id": "expanded-fr-02", "lang": "fr", "question": "Quand une personne est-elle capable de discernement selon le Code civil ?", "expected_sources": ["SR 210 Art. 16"], "expected_keywords": ["discernement", "raisonnablement"], "must_refuse": false}
+{"id": "expanded-fr-03", "lang": "fr", "question": "Combien de semaines de vacances au moins l'employeur doit-il accorder par année de service ?", "expected_sources": ["SR 220 Art. 329a"], "expected_keywords": ["quatre semaines", "cinq semaines"], "must_refuse": false}
+{"id": "expanded-fr-04", "lang": "fr", "question": "Quels principes régissent le traitement des données personnelles selon la loi sur la protection des données ?", "expected_sources": ["SR 235.1 Art. 6"], "expected_keywords": ["licite", "proportionnalité"], "must_refuse": false}
+{"id": "expanded-fr-05", "lang": "fr", "question": "Quelles conditions le Code pénal prévoit-il pour l'escroquerie ?", "expected_sources": ["SR 311.0 Art. 146"], "expected_keywords": ["enrichissement illégitime", "erreur"], "must_refuse": false}
+{"id": "expanded-fr-06", "lang": "fr", "question": "Quelle est la durée maximale de la semaine de travail selon la loi sur le travail ?", "expected_sources": ["SR 822.11 Art. 9"], "expected_keywords": ["45 heures", "50 heures"], "must_refuse": false}
+{"id": "expanded-fr-07", "lang": "fr", "question": "Quel est le taux de l'impôt cantonal pour mon revenu dans le canton de Vaud ?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-fr-08", "lang": "fr", "question": "Quel traitement médical dois-je suivre pour une migraine ?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-it-01", "lang": "it", "question": "Quali principi sancisce la Costituzione federale in materia di uguaglianza e divieto di discriminazione?", "expected_sources": ["SR 101 Art. 8"], "expected_keywords": ["uguali", "discriminato"], "must_refuse": false}
+{"id": "expanded-it-02", "lang": "it", "question": "Quando una persona è capace di discernimento secondo il Codice civile?", "expected_sources": ["SR 210 Art. 16"], "expected_keywords": ["discernimento", "ragionevolmente"], "must_refuse": false}
+{"id": "expanded-it-03", "lang": "it", "question": "Quante settimane di vacanza deve concedere almeno il datore di lavoro per ogni anno di lavoro?", "expected_sources": ["SR 220 Art. 329a"], "expected_keywords": ["quattro settimane", "cinque settimane"], "must_refuse": false}
+{"id": "expanded-it-04", "lang": "it", "question": "Quali principi disciplinano il trattamento dei dati personali secondo la legge sulla protezione dei dati?", "expected_sources": ["SR 235.1 Art. 6"], "expected_keywords": ["lecito", "proporzionalità"], "must_refuse": false}
+{"id": "expanded-it-05", "lang": "it", "question": "Quali condizioni prevede il Codice penale per il reato di truffa?", "expected_sources": ["SR 311.0 Art. 146"], "expected_keywords": ["indebito profitto", "inganna"], "must_refuse": false}
+{"id": "expanded-it-06", "lang": "it", "question": "Qual è la durata massima della settimana lavorativa secondo la legge sul lavoro?", "expected_sources": ["SR 822.11 Art. 9"], "expected_keywords": ["45 ore", "50 ore"], "must_refuse": false}
+{"id": "expanded-it-07", "lang": "it", "question": "Quale autorizzazione edilizia serve per costruire un ampliamento privato nel Cantone Ticino?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "expanded-it-08", "lang": "it", "question": "Quale medicinale e quale dose devo assumere per curare l'influenza?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}

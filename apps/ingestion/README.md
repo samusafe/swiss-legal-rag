@@ -1,46 +1,47 @@
-# ingestion
+# Ingestion
 
-Python CLI that builds the corpus: resolve Fedlex SPARQL → fetch Akoma Ntoso XML → parse articles (1 article = 1 chunk) → embed via Ollama → index into pgvector.
+Python CLI that builds the local corpus: resolve Fedlex SPARQL metadata, fetch consolidated Akoma Ntoso XML, parse one article per chunk, embed through Ollama, and index into PostgreSQL/pgvector.
 
 ## Setup
 
-```
+```bash
 cd apps/ingestion
 python -m venv .venv
-# Windows: .venv\Scripts\activate    Linux: source .venv/bin/activate
+# Windows: .venv\Scripts\activate; Linux/macOS: source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## Usage (from repo root)
+## Pipeline
 
+Run from the repository root:
+
+```bash
+ingest resolve    # corpus.yaml -> data/manifest.json
+ingest fetch      # manifest -> data/raw/<sr>/<lang>.xml
+ingest parse      # XML -> data/chunks/<sr>/<lang>.jsonl
+ingest embed      # chunks -> PostgreSQL/pgvector
 ```
-ingest resolve    # corpus.yaml -> data/manifest.json (current versions via SPARQL)
-ingest fetch      # manifest -> data/raw/<sr>/<lang>.xml (cached, ~1 req/s)
-ingest parse      # manifest + raw XML -> data/chunks/<sr>/<lang>.jsonl (1 line = 1 article chunk)
-ingest embed      # chunks JSONL -> Postgres/pgvector (schema applied automatically)
-```
 
-### Embedding
+`resolve` asks the Fedlex SPARQL endpoint for current versions. `fetch` accepts only HTTPS URLs on `fedlex.data.admin.ch`, streams through a 50 MB limit, writes a temporary file, and atomically replaces the cache. `fetch-meta.json` records the URL and version date, so changed upstream versions are downloaded instead of being mistaken for an existing cache.
 
-`ingest embed` needs two services running:
+`embed` refreshes each act present in the current chunk directory transactionally. This removes revoked or renumbered articles, but recomputes embeddings for the complete act on every refresh — an interrupted rerun re-embeds the affected acts from scratch, not just the rows still missing vectors. Embedding the full corpus (~13k chunks) takes roughly 1-3 hours on a laptop CPU; avoid interrupting a run mid-way.
 
-1. Postgres with pgvector: `docker compose up -d` (from repo root).
-2. Ollama with the embedding model pulled: `ollama pull bge-m3`, then make sure `ollama serve` (or the desktop app) is running.
+## Configuration
 
-Configuration comes from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`.
+Copy the repository root `.env.example` to `.env`. The important values are `DATABASE_URL`, `OLLAMA_BASE_URL`, and `EMBEDDING_MODEL` (default `bge-m3`). Start PostgreSQL with `docker compose up -d` and Ollama with `ollama pull bge-m3` before `ingest embed`.
 
-The command is **resumable**: chunks whose text is unchanged and already embedded are skipped, so you can interrupt it (Ctrl+C) and rerun at any time — including finishing a run started on another machine, as long as it points at the same database. Progress is committed per batch.
+The downloaded corpus is machine-local under `data/` and is ignored by Git. Never commit credentials, private documents, or model/cache directories.
 
-Expect roughly **1–3 hours on a laptop CPU** for the full corpus (~13k chunks); a machine with a GPU-accelerated Ollama does the same in ~15 minutes. A rerun over an already-embedded corpus takes seconds.
+## Tests and checks
 
-## Tests
-
-Run from `apps/ingestion`:
-
-```
+```bash
 cd apps/ingestion
-pytest            # unit tests (offline; corpus integration auto-skips without data/raw)
-pytest -m live    # opt-in smoke test against the real Fedlex endpoint
-pytest -m corpus  # only the corpus integration test
-pytest -m db      # database integration test (auto-skips when Postgres is unreachable)
+pytest
+pytest -m live       # opt-in real Fedlex smoke test
+pytest -m corpus     # local corpus integration test
+pytest -m db         # database integration test; skips when unavailable
+ruff check ingestion tests
+mypy ingestion
 ```
+
+The default suite is offline and excludes `live` tests. The parser uses secure XML parsing and should be treated as an untrusted-input boundary when adding new source formats.

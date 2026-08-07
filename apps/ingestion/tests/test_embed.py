@@ -1,4 +1,6 @@
 from datetime import date
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -57,7 +59,7 @@ def test_embed_texts_fails_loud() -> None:
         embed_texts(client, "http://localhost:11434", "bge-m3", ["a"])
 
 
-def test_load_chunks_reports_all_collisions(tmp_path) -> None:
+def test_load_chunks_reports_all_collisions(tmp_path: Path) -> None:
     from ingestion.embed import load_chunks
 
     lang_dir = tmp_path / "de"
@@ -85,5 +87,39 @@ def test_load_chunks_reports_all_collisions(tmp_path) -> None:
     message = str(excinfo.value)
     assert "duplicate chunk keys" in message
     assert message.count("articles") == 2  # both collisions listed, not just the first
+
+
+def test_upsert_chunks_deletes_stale_rows_before_inserting() -> None:
+    from ingestion.embed import upsert_chunks
+
+    cursor = MagicMock()
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cursor
+
+    chunks = [
+        chunk_for(None),
+        chunk_for(None).model_copy(
+            update={
+                "sr": "221",
+                "eid": "art_1",
+                "article": "1",
+                "eli": "https://www.fedlex.admin.ch/eli/cc/other/de#art_1",
+            }
+        ),
+    ]
+
+    upsert_chunks(conn, chunks)
+
+    sqls = [call.args[0].strip() for call in cursor.execute.call_args_list]
+    delete_sqls = [(i, sql) for i, sql in enumerate(sqls) if sql.startswith("DELETE FROM chunks")]
+    insert_sqls = [(i, sql) for i, sql in enumerate(sqls) if sql.startswith("INSERT INTO chunks")]
+    delete_srs = {cursor.execute.call_args_list[i].args[1][0] for i, _ in delete_sqls}
+
+    assert delete_srs == {"220", "221"}
+    assert len(insert_sqls) == 2
+    # every act's stale rows are gone before any replacement row lands, all inside
+    # the same transaction — revoked/renumbered articles disappear atomically
+    assert max(i for i, _ in delete_sqls) < min(i for i, _ in insert_sqls)
+    conn.commit.assert_called_once()
 
 

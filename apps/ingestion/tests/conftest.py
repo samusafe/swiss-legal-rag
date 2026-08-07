@@ -41,7 +41,7 @@ def canned_rows() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-def sparql_client(canned_rows) -> httpx.Client:
+def sparql_client(canned_rows: list[dict[str, Any]]) -> httpx.Client:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=sparql_response(canned_rows))
 

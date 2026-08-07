@@ -36,6 +36,7 @@ def connect(settings: Settings) -> psycopg.Connection:
 
 
 def _rows(cur: psycopg.Cursor) -> list[ChunkRow]:
+    assert cur.description is not None
     names = [d.name for d in cur.description]
     rows = [ChunkRow.model_validate(dict(zip(names, row))) for row in cur.fetchall()]
     # DB stores part=0 for whole articles; the API contract uses null.

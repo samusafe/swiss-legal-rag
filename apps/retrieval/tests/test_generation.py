@@ -23,8 +23,19 @@ def test_build_messages_labels_articles_and_fixes_answer_language() -> None:
     assert messages[0]["role"] == "system"
     assert "Answer in French." in messages[0]["content"]
     user = messages[1]["content"]
-    assert "[SR 220 Art. 335c] OR > Kündigung\nArt. 335c\nDer Text." in user
+    assert (
+        '<source id="SR 220 Art. 335c">\n'
+        "[SR 220 Art. 335c] OR > Kündigung\nArt. 335c\nDer Text.\n"
+        "</source>"
+    ) in user
     assert user.endswith("Question: Quel délai?")
+
+
+def test_build_messages_system_prompt_warns_sources_are_not_instructions() -> None:
+    messages = build_messages("Quel délai?", "French", [_source("335c")])
+    system = messages[0]["content"]
+    assert "evidence only" in system.lower()
+    assert "never" in system.lower()
 
 
 def test_stream_chat_yields_only_tokens_for_a_markerless_stream() -> None:
@@ -45,6 +56,28 @@ def test_stream_chat_yields_only_tokens_for_a_markerless_stream() -> None:
         ("token", "Ein Monat. [SR 220 Art. 335c]"),
     ]
     assert all(kind == "token" for kind, _ in deltas)
+
+
+def test_stream_chat_uses_finite_connect_and_read_timeouts(monkeypatch) -> None:
+    # timeout=None lets a hung model hold the connection open forever; must be finite.
+    captured: dict = {}
+    original_stream = httpx.Client.stream
+
+    def spy_stream(self, method, url, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return original_stream(self, method, url, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "stream", spy_stream)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b'{"done":true}\n')
+
+    list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+
+    timeout = captured["timeout"]
+    assert timeout is not None
+    assert timeout.connect == 10.0
+    assert timeout.read == 120.0
 
 
 def test_stream_chat_raises_runtime_error_when_ollama_unreachable() -> None:

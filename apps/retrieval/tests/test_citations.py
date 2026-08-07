@@ -4,13 +4,13 @@ from retrieval.citations import extract_citations
 from retrieval.models import SearchResult
 
 
-def _source(sr: str, article: str) -> SearchResult:
+def _source(sr: str, article: str, lang: str = "de", score: float = 0.9) -> SearchResult:
     return SearchResult(
-        sr=sr, lang="de", article=article, part=None, eid=f"art_{article}",
+        sr=sr, lang=lang, article=article, part=None, eid=f"art_{article}",
         heading=None, context=None, text="body",
-        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_{article}",
+        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}#art_{article}",
         act_name="Code of Obligations", abbrev="OR", version_date=date(2026, 1, 1),
-        score=0.9,
+        score=score,
     )
 
 
@@ -53,3 +53,24 @@ def test_dotted_sr_number_resolves() -> None:
 def test_letter_suffixed_article_resolves() -> None:
     citations = extract_citations("[SR 220 Art. 219a]", [_source("220", "219a")])
     assert citations[0].resolved is True
+
+
+def test_citation_resolves_to_source_matching_answer_language() -> None:
+    de = _source("220", "1", lang="de", score=0.5)
+    fr = _source("220", "1", lang="fr", score=0.2)
+    citations = extract_citations("[SR 220 Art. 1]", [de, fr], answer_lang="fr")
+    assert citations[0].eli == fr.eli
+
+
+def test_citation_falls_back_to_best_scored_when_no_lang_match() -> None:
+    de = _source("220", "1", lang="de", score=0.5)
+    fr = _source("220", "1", lang="fr", score=0.2)
+    citations = extract_citations("[SR 220 Art. 1]", [de, fr], answer_lang="it")
+    assert citations[0].eli == de.eli
+
+
+def test_citation_falls_back_to_best_scored_when_answer_lang_unknown() -> None:
+    low = _source("220", "1", lang="de", score=0.1)
+    high = _source("220", "1", lang="fr", score=0.7)
+    citations = extract_citations("[SR 220 Art. 1]", [low, high])
+    assert citations[0].eli == high.eli

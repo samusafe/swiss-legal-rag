@@ -34,24 +34,16 @@ CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv);
 
 _TS_CONFIGS = {"de": "german", "fr": "french", "it": "italian"}
 
-_UPSERT_SQL = """
+_INSERT_SQL = """
 INSERT INTO chunks (eli, part, sr, lang, article, eid, heading, context,
                     act_name, abbrev, version_date, text, tsv)
 VALUES (%(eli)s, %(part)s, %(sr)s, %(lang)s, %(article)s, %(eid)s, %(heading)s, %(context)s,
         %(act_name)s, %(abbrev)s, %(version_date)s, %(text)s,
         to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s))
-ON CONFLICT (eli, part) DO UPDATE SET
-    sr = EXCLUDED.sr, lang = EXCLUDED.lang, article = EXCLUDED.article, eid = EXCLUDED.eid,
-    heading = EXCLUDED.heading, context = EXCLUDED.context, act_name = EXCLUDED.act_name,
-    abbrev = EXCLUDED.abbrev, version_date = EXCLUDED.version_date,
-    text = EXCLUDED.text, tsv = EXCLUDED.tsv,
-    embedding = CASE WHEN chunks.text = EXCLUDED.text THEN chunks.embedding ELSE NULL END
-WHERE (chunks.sr, chunks.lang, chunks.article, chunks.eid, chunks.heading, chunks.context,
-       chunks.act_name, chunks.abbrev, chunks.version_date, chunks.text)
-      IS DISTINCT FROM
-      (EXCLUDED.sr, EXCLUDED.lang, EXCLUDED.article, EXCLUDED.eid, EXCLUDED.heading, EXCLUDED.context,
-       EXCLUDED.act_name, EXCLUDED.abbrev, EXCLUDED.version_date, EXCLUDED.text)
 """
+# No ON CONFLICT clause: upsert_chunks deletes each act's rows before inserting,
+# and _check_no_duplicate_keys already rejects duplicate (eli, part) keys within
+# a batch, so every insert here targets a fresh row.
 
 
 def ts_config(lang: str) -> str:
@@ -93,8 +85,9 @@ def load_chunks(chunks_dir: Path) -> list[Chunk]:
 
 
 def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
-    # ON CONFLICT (eli, part) DO UPDATE silently drops one chunk per collision
-    # (last write wins) — fail loud, and report every collision at once.
+    # upsert_chunks has no ON CONFLICT handling, so a duplicate (eli, part) key
+    # would otherwise surface as an opaque UNIQUE-violation from Postgres — fail
+    # loud here instead, and report every collision at once.
     seen: dict[tuple[str, int], Chunk] = {}
     collisions: list[str] = []
     for chunk in chunks:
@@ -115,12 +108,19 @@ def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
 
 
 def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
+    # Wholesale-refresh every act present in `chunks`: delete its existing rows first,
+    # then re-insert the current set, all in one transaction. This makes revoked or
+    # renumbered articles disappear atomically instead of accumulating as stale rows
+    # that a pure upsert would never remove.
+    acts = list(dict.fromkeys(chunk.sr for chunk in chunks))
     with conn.cursor() as cur:
+        for sr in acts:
+            cur.execute("DELETE FROM chunks WHERE sr = %s", (sr,))
         for chunk in chunks:
             params = chunk.model_dump()
             params["part"] = chunk.part or 0
             params["ts_config"] = ts_config(chunk.lang)
-            cur.execute(_UPSERT_SQL, params)
+            cur.execute(_INSERT_SQL, params)
     conn.commit()
 
 
@@ -165,4 +165,5 @@ def run_embed(data_dir: Path) -> None:
         with httpx.Client(timeout=300.0) as client:
             done = embed_pending(conn, client, base_url, model)
         remaining = conn.execute("SELECT count(*) FROM chunks WHERE embedding IS NULL").fetchone()
+        assert remaining is not None
         print(f"embedded {done} new vectors; {remaining[0]} still pending", flush=True)

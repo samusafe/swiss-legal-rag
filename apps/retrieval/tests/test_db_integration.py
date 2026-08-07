@@ -61,22 +61,22 @@ def test_dense_and_fts_search() -> None:
                     (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s))
                 """
                 , (
-                    "220", "de", "335a", 0, "art_335_a", "Kündigungsfrist", None, "Kündigungsfrist Arbeitsverhältnis", "https://test.eli/1", "Test Act", "TA", date(2026, 1, 1), [0.1] * 1024, "Kündigungsfrist Arbeitsverhältnis",
-                    "220", "de", "335b", 0, "art_335_b", "Mietvertrag", None, "Mietvertrag Wohnung", "https://test.eli/2", "Test Act", "TA", date(2026, 1, 1), [0.2] * 1024, "Mietvertrag Wohnung",
-                    "220", "de", "335c", 0, "art_335_c", "Datenschutz", None, "Datenschutz Personendaten", "https://test.eli/3", "Test Act", "TA", date(2026, 1, 1), [0.9] * 1024, "Datenschutz Personendaten",
+                    "220", "de", "335a", 0, "art_335_a", "Kündigungsfrist", None, "syntheticmarker Kündigungsfrist Arbeitsverhältnis", "https://test.eli/1", "Test Act", "TA", date(2026, 1, 1), [0.1] + [0.0] * 1023, "syntheticmarker Kündigungsfrist Arbeitsverhältnis",
+                    "220", "de", "335b", 0, "art_335_b", "Mietvertrag", None, "Mietvertrag Wohnung", "https://test.eli/2", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.2] + [0.0] * 1022, "Mietvertrag Wohnung",
+                    "220", "de", "335c", 0, "art_335_c", "Datenschutz", None, "Datenschutz Personendaten", "https://test.eli/3", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.0, 0.9] + [0.0] * 1021, "Datenschutz Personendaten",
                 )
             )
             conn.commit()
 
         # Test dense_search returns nearest first
-        results = dense_search(conn, [0.1] * 1024, 3)
+        results = dense_search(conn, [0.1] + [0.0] * 1023, 3)
         assert len(results) == 3
-        assert results[0].text == "Kündigungsfrist Arbeitsverhältnis"
+        assert results[0].text == "syntheticmarker Kündigungsfrist Arbeitsverhältnis"
 
         # Test fts_search returns matching row first
-        results = fts_search(conn, "Kündigungsfrist", "de", 5)
+        results = fts_search(conn, "syntheticmarker", "de", 5)
         assert len(results) >= 1
-        assert results[0].text == "Kündigungsfrist Arbeitsverhältnis"
+        assert results[0].text == "syntheticmarker Kündigungsfrist Arbeitsverhältnis"
     finally:
         # Cleanup: delete test rows on the same live connection before closing
         with conn.cursor() as cur:

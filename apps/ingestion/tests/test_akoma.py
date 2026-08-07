@@ -6,6 +6,7 @@ from lxml import etree
 
 from ingestion.akoma import (
     AKN_NS,
+    FEDLEX_NS,
     MAX_CHUNK_CHARS,
     _disambiguate_duplicate_keys,
     article_number,
@@ -251,6 +252,24 @@ def test_parse_act_fails_loud_on_empty_body(tmp_path: Path) -> None:
 def test_parse_act_fails_loud_on_missing_file(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="missing"):
         parse_act(tmp_path / "nope.xml", entry_for())
+
+
+def test_parse_act_does_not_resolve_external_entities(tmp_path: Path) -> None:
+    secret = tmp_path / "secret.txt"
+    secret.write_text("PWNED", encoding="utf-8")
+    xml_path = tmp_path / "de.xml"
+    xml_path.write_bytes(
+        (
+            '<?xml version="1.0"?>\n'
+            f'<!DOCTYPE akomaNtoso [<!ENTITY xxe SYSTEM "file:///{secret.as_posix()}">]>\n'
+            f'<akomaNtoso xmlns="{AKN_NS}" xmlns:fedlex="{FEDLEX_NS}">'
+            '<act><body><article eId="art_1"><num>Art. 1</num>'
+            '<paragraph eId="art_1/para"><content><p>&xxe;</p></content></paragraph>'
+            "</article></body></act></akomaNtoso>"
+        ).encode()
+    )
+    chunks = parse_act(xml_path, entry_for())
+    assert "PWNED" not in chunks[0].text
 
 
 def test_parse_act_skips_repeal_stub_bodies(tmp_path: Path) -> None:

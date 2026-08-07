@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from retrieval.app import create_app
 from retrieval.search import SearchDeps
-from tests.test_search import deps_with
+from tests.test_search import A, deps_with
 
 
 def _client(deps: SearchDeps) -> TestClient:
@@ -225,9 +225,9 @@ def test_chat_without_lang_falls_back_to_dense_only_when_undetected_lang(monkeyp
     monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
     deps = SearchDeps(
         embed=lambda text: [0.0] * 1024,
-        dense=lambda vector, k: [],
+        dense=lambda vector, k: [A],  # non-empty: exercises build_messages, not the refusal path
         fts=exploding_fts,
-        rerank=lambda q, texts: [],
+        rerank=lambda q, texts: [0.5],
     )
     app = create_app()
     app.state.deps = deps
@@ -236,6 +236,35 @@ def test_chat_without_lang_falls_back_to_dense_only_when_undetected_lang(monkeyp
 
     assert response.status_code == 200
     assert captured_messages == [("frage", "Portuguese")]
+
+
+def test_chat_refuses_without_calling_ollama_when_no_sources_retrieved(monkeypatch) -> None:
+    def exploding_stream(client, base_url, model, messages):
+        raise AssertionError("Ollama must not be called when retrieval returns no sources")
+
+    monkeypatch.setattr("retrieval.app.stream_chat", exploding_stream)
+    deps = SearchDeps(
+        embed=lambda text: [0.0] * 1024,
+        dense=lambda vector, k: [],
+        fts=lambda q, lang, k: [],
+        rerank=lambda q, texts: [],
+    )
+    app = create_app()
+    app.state.deps = deps
+    with TestClient(app) as client:
+        response = client.post("/chat", json={"question": "frage", "lang": "de"})
+
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert [name for name, _ in events] == ["sources", "token", "done"]
+    assert events[0][1]["sources"] == []
+    assert events[1][1] == {
+        "delta": "The current corpus contains no sources sufficient to answer this question."
+    }
+    done = events[-1][1]
+    assert done["citations"] == []
+    assert done["model"] == app.state.settings.chat_model
+    assert isinstance(done["duration_ms"], int)
 
 
 def test_chat_returns_503_when_retrieval_fails() -> None:

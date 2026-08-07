@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from retrieval.models import SearchRequest
+from retrieval.models import ChatRequest, SearchRequest
 
 
 def test_request_defaults() -> None:
@@ -30,3 +30,21 @@ def test_search_request_k_rejects_out_of_bounds() -> None:
         SearchRequest(q="x", lang="de", k=0)
     with pytest.raises(ValidationError):
         SearchRequest(q="x", lang="de", k=21)
+
+
+def test_search_request_q_accepts_max_length() -> None:
+    assert SearchRequest(q="x" * 2000, lang="de").q == "x" * 2000
+
+
+def test_search_request_q_rejects_over_max_length() -> None:
+    with pytest.raises(ValidationError):
+        SearchRequest(q="x" * 2001, lang="de")
+
+
+def test_chat_request_question_accepts_max_length() -> None:
+    assert ChatRequest(question="x" * 2000).question == "x" * 2000
+
+
+def test_chat_request_question_rejects_over_max_length() -> None:
+    with pytest.raises(ValidationError):
+        ChatRequest(question="x" * 2001)

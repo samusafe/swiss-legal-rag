@@ -81,7 +81,9 @@ def run(
     questions = load_gold(dataset)
 
     owns_client = client is None
-    http_client = client if client is not None else httpx.Client(timeout=60.0)
+    # CPU-only hosts: a cold /search loads bge-m3 + the reranker (~80 s) and a
+    # warm rerank alone takes ~30 s, so 60 s timed out every question.
+    http_client = client if client is not None else httpx.Client(timeout=300.0)
     try:
         rows = [
             _score_question(question, mode, k, base_url, http_client, clock)

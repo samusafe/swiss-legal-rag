@@ -1,51 +1,40 @@
-# desktop
+# Desktop client
 
-Tauri 2 + Vite + React + Tailwind + HeroUI chat UI over the retrieval API: SSE-streamed answers, citation chips that open the cited Fedlex article in the system browser, automatic answer-language detection (no language picker — the backend detects the question's language), and a panel showing the articles retrieved for the latest answer. Talks only to `http://localhost:8000` — never to Postgres directly.
+Tauri 2 + React + Vite desktop client for the retrieval API. It renders streamed answers, optional model reasoning, source cards, resolved citation links, and ingestion progress. The client talks only to `http://localhost:8000`; it never connects to PostgreSQL directly.
 
 ## Prerequisites
 
-- Node.js ≥ 20 and pnpm (`npm install -g pnpm`)
-- Rust toolchain (rustup) + Tauri system dependencies — WebView2 ships with Windows 11; `webkit2gtk` on Linux ([Tauri prerequisites](https://tauri.app/start/prerequisites/))
-- The retrieval API running with its own prerequisites (Postgres, Ollama, embedded corpus) — see [`../retrieval/README.md`](../retrieval/README.md)
+- Node.js 20.19+ or 22.12+ and pnpm
+- Rust and the platform prerequisites listed in the [Tauri guide](https://tauri.app/start/prerequisites/)
+- The retrieval API, PostgreSQL, Ollama, and an embedded corpus; see [retrieval](../retrieval/README.md)
 
-## Run
+## Run and verify
 
-```
+```bash
 pnpm install
 pnpm tauri dev
 ```
 
-Frontend-only checks (no Rust needed):
+Frontend-only checks do not require Rust:
 
-```
-pnpm test    # Vitest + React Testing Library
-pnpm build   # type-check + production bundle
+```bash
+pnpm test
+pnpm build       # TypeScript check + Vite production bundle
 ```
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | `http://localhost:8000` | Base URL of the retrieval API (build-time; put it in `.env`, see `.env.example`) |
+| `VITE_API_BASE_URL` | `http://localhost:8000` | Retrieval API base URL at build time |
 
-## Behavior notes
+Keep the API local unless you add authentication, authorization, and an appropriate CORS policy. The backend is intentionally a trusted-local-user service.
 
-- The composer is disabled until `GET /health` succeeds (status dot in the header).
-- Answers stream token-by-token; when generation fails mid-stream the partial text is kept and the error is shown on the message.
-- The first `/chat` after backend start takes ~30 s (lazy reranker load — see the retrieval README).
-- The corpus icon in the header opens the Corpus panel: one "Update corpus" button runs the
-  full ingestion pipeline server-side with a live embedding progress bar. Closing the panel
-  never stops a run; chat stays usable while embedding (results may be incomplete until done).
-- The Stop button aborts the in-flight stream and keeps whatever partial answer already
-  arrived, marked "stopped".
-- While waiting for a response, a thinking indicator shows "Searching articles…" until the
-  retrieved sources arrive, then "Thinking…" until the first answer token streams in. Click it
-  to expand the model's streamed reasoning (collapsed by default); the whole indicator
-  disappears once the answer starts streaming.
-- The sources panel always shows the latest answer's results only, one card per article (the
-  best-scored part, for articles split across multiple chunks). The relevance bar is scaled
-  relative to the other results in that answer's set, not an absolute score — the raw score is
-  shown beside it. A "Cited" badge marks the articles the answer actually cited inline.
-- Clicking a previous answer bubble selects it (highlighted ring) and switches the sources
-  panel to that answer's articles ("answer N" in the panel header); clicking it again — or
-  asking a new question — returns to the latest answer.
+## Behavior
+
+- The composer is disabled until `/health` responds successfully.
+- A chat shows sources first, accumulates optional `thinking` events separately, then streams answer tokens. Reasoning is collapsed by default and is not used for citation extraction.
+- A mid-stream error preserves the partial answer; Stop aborts the request and marks the partial answer as stopped.
+- The corpus panel starts the server-side `resolve -> fetch -> parse -> embed` pipeline and displays live progress. Closing it does not cancel ingestion.
+- Updating the corpus can re-embed acts wholesale, not just changed rows — expect a long CPU-bound job (see `apps/ingestion/README.md`).
+- Sources are scoped to the latest selected answer and open their official Fedlex ELI links in the system browser.

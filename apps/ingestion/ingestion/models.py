@@ -14,6 +14,13 @@ class ManifestEntry(BaseModel):
     file_url: str
 
 
+class FetchMeta(BaseModel):
+    """Per-language fetch fingerprint, cached in data/raw/<sr>/fetch-meta.json."""
+
+    file_url: str
+    version_date: date
+
+
 class Manifest(BaseModel):
     entries: list[ManifestEntry]
 

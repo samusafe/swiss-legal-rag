@@ -2,10 +2,13 @@ import json
 import os
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
+
+RunFn = Callable[..., subprocess.CompletedProcess[str]]
 
 PHASES: tuple[str, ...] = ("resolve", "fetch", "parse", "embed")
 
@@ -96,7 +99,7 @@ def phase_progress(
     raise ValueError(f"unknown phase: {phase}")
 
 
-def _run_pipeline(state: IngestState, python: Path, repo_root: Path, run) -> None:
+def _run_pipeline(state: IngestState, python: Path, repo_root: Path, run: RunFn) -> None:
     phase = PHASES[0]
     try:
         for phase in PHASES:
@@ -128,7 +131,7 @@ def start_ingest(
     state: IngestState,
     python: Path,
     repo_root: Path = REPO_ROOT,
-    run=subprocess.run,
+    run: RunFn = subprocess.run,
 ) -> bool:
     with state.lock:
         if state.thread is not None and state.thread.is_alive():

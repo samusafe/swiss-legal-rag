@@ -1,6 +1,6 @@
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -23,7 +23,12 @@ from retrieval.ingest import (
     phase_progress,
     start_ingest,
 )
-from retrieval.language import answer_language, detect_language, fts_language
+from retrieval.language import (
+    answer_language,
+    answer_language_code,
+    detect_language,
+    fts_language,
+)
 from retrieval.models import ChatRequest, SearchRequest, SearchResponse
 from retrieval.rerank import Reranker
 from retrieval.search import SearchDeps, run_search
@@ -75,7 +80,7 @@ def _close_client(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = Settings.from_env()
         if app.state.deps is None:  # tests inject fakes before startup
             _connect_deps(app)
@@ -119,6 +124,9 @@ def create_app() -> FastAPI:
             ) from error
 
     _SOURCE_FIELDS = {"sr", "article", "heading", "eli", "lang", "score"}
+    # Exact wording is part of the citation contract: the M6 evals refusal metric
+    # counts zero resolved citations, so this sentence must never carry a [SR ...] tag.
+    _REFUSAL_TEXT = "The current corpus contains no sources sufficient to answer this question."
 
     @app.post("/chat")
     def chat(request: ChatRequest) -> StreamingResponse:
@@ -142,11 +150,8 @@ def create_app() -> FastAPI:
             ) from error
 
         settings = app.state.settings
-        if app.state.client is None:  # deps were injected without a real client
-            app.state.client = httpx.Client(timeout=60.0)
-        client = app.state.client
         sources = search_response.results
-        messages = build_messages(request.question, language, sources)
+        answer_lang = answer_language_code(request.lang, detected)
 
         def events() -> Iterator[str]:
             yield _sse(
@@ -154,6 +159,23 @@ def create_app() -> FastAPI:
                 {"sources": [s.model_dump(include=_SOURCE_FIELDS) for s in sources]},
             )
             t0 = time.perf_counter()
+            if not sources:
+                # Nothing to ground an answer in — refuse deterministically without
+                # spending a generation call on it (Ollama is never invoked).
+                yield _sse("token", {"delta": _REFUSAL_TEXT})
+                yield _sse(
+                    "done",
+                    {
+                        "citations": [],
+                        "model": settings.chat_model,
+                        "duration_ms": int((time.perf_counter() - t0) * 1000),
+                    },
+                )
+                return
+            if app.state.client is None:  # deps were injected without a real client
+                app.state.client = httpx.Client(timeout=60.0)
+            client = app.state.client
+            messages = build_messages(request.question, language, sources)
             parts: list[str] = []
             try:
                 for kind, delta in stream_chat(
@@ -167,7 +189,7 @@ def create_app() -> FastAPI:
             except Exception as error:
                 yield _sse("error", {"detail": str(error)})
                 return
-            citations = extract_citations("".join(parts), sources)
+            citations = extract_citations("".join(parts), sources, answer_lang)
             yield _sse(
                 "done",
                 {

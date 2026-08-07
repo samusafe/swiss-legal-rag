@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [ingestion, retrieval, evals]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/${{ matrix.app }}/pyproject.toml
+
+      # Each app is self-contained: pytest, ruff, and mypy all live in its own
+      # "dev" extra. retrieval also pulls in sentence-transformers -> torch;
+      # the default PyPI wheel on Linux is the CUDA build, a large download
+      # that can take several minutes on a cold cache — accepted here for
+      # full parity with local dev; the push/PR-on-master trigger keeps run
+      # frequency low.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: mypy
+        run: mypy ${{ matrix.app }}
+
+      - name: pytest (ingestion)
+        if: matrix.app == 'ingestion'
+        run: pytest -q -m "not db and not live"
+
+      - name: pytest (retrieval)
+        if: matrix.app == 'retrieval'
+        run: pytest -q -m "not db"
+
+      - name: pytest (evals)
+        if: matrix.app == 'evals'
+        run: pytest -q
+
+  desktop:
+    name: Desktop frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm via corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.x"
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+      # No Rust/Tauri build job: `tauri build` compiles a full native binary
+      # per target OS and is too heavy for free GitHub-hosted runners. The
+      # `pnpm build` step above covers the TypeScript/Vite frontend build,
+      # which is what changes on every PR; the Rust shell is exercised
+      # locally via `pnpm tauri build` before a release.

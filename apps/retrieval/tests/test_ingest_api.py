@@ -1,7 +1,6 @@
 from fastapi.testclient import TestClient
 
 from retrieval.app import create_app
-from retrieval.ingest import IngestState
 from tests.test_search import deps_with
 
 

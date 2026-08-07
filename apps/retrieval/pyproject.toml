@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -28,3 +28,18 @@ include = ["retrieval*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["db: needs the local Postgres from docker compose (auto-skipped when unreachable)"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["psycopg.*", "pgvector.*", "sentence_transformers.*", "langdetect.*"]
+ignore_missing_imports = true

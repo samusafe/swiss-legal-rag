@@ -22,7 +22,7 @@ jobs:
         working-directory: apps/${{ matrix.app }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -68,7 +68,7 @@ jobs:
         working-directory: apps/desktop
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Install the exact package-manager version before setup-node asks pnpm
       # for its store path while configuring the dependency cache. Relying on

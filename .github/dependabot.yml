@@ -19,6 +19,11 @@ updates:
     directory: "/apps/desktop"
     schedule:
       interval: "weekly"
+    ignore:
+      # HeroUI v3 is a breaking UI migration (component API changes across
+      # the app); done deliberately, not via automated PRs.
+      - dependency-name: "@heroui/*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

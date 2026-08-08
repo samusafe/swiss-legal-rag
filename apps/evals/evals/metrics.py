@@ -12,6 +12,11 @@ from collections.abc import Sequence
 
 _SOURCE_RE = re.compile(r"^SR\s+(\S+)\s+Art\.\s+(\S+)$", re.IGNORECASE)
 
+# Must match retrieval/generation.py's REFUSAL_SENTENCE verbatim (apps/evals has no
+# dependency on apps/retrieval — the two packages talk over HTTP, so the sentence is
+# duplicated here as the evals side's single source of truth for the contract).
+REFUSAL_SENTENCE = "The current corpus contains no sources sufficient to answer this question."
+
 
 def _parse_source(source: str) -> tuple[str, str]:
     match = _SOURCE_RE.match(source.strip())
@@ -50,10 +55,24 @@ def keyword_recall(answer: str, keywords: Sequence[str]) -> float | None:
     return hits / len(keywords)
 
 
-def refusal_ok(citations: list[dict], must_refuse: bool) -> bool | None:
+def _normalize_for_refusal_match(text: str) -> str:
+    """Casefold + collapse all whitespace runs to a single space + strip."""
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def refusal_ok(citations: list[dict], must_refuse: bool, answer: str) -> bool | None:
+    """True only when nothing resolved AND the whole answer equals the canonical
+    refusal sentence after normalization (casefold + whitespace-collapse) — zero
+    citations alone no longer counts as a refusal, since a model can drop
+    citations without actually declining to answer, and a sentence merely
+    containing the canonical text (e.g. with extra hedging words) no longer
+    counts either, matching the upstream harness's exact-match contract."""
     if not must_refuse:
         return None
-    return not any(c.get("resolved") for c in citations)
+    nothing_resolved = not any(c.get("resolved") for c in citations)
+    return nothing_resolved and (
+        _normalize_for_refusal_match(answer) == _normalize_for_refusal_match(REFUSAL_SENTENCE)
+    )
 
 
 _MEAN_METRICS = {

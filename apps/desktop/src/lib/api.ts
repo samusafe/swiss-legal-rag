@@ -27,9 +27,22 @@ export type ChatEvent =
 export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+// Debug feature, off by default: raw model reasoning is unpredictable and not
+// meant for end users. Set VITE_SHOW_THINKING=true at build time to enable the
+// expandable reasoning disclosure in MessageList.
+export const SHOW_THINKING: boolean = import.meta.env.VITE_SHOW_THINKING === "true";
+
+// Empty by default, matching the retrieval API's own opt-in API_KEY (unset = no
+// auth). Set VITE_API_KEY at build time when the retrieval API requires it.
+export const API_KEY: string = import.meta.env.VITE_API_KEY ?? "";
+
+function authHeaders(base: Record<string, string> = {}): Record<string, string> {
+  return API_KEY === "" ? base : { ...base, "X-API-Key": API_KEY };
+}
+
 export async function getHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(`${API_BASE_URL}/health`, { headers: authHeaders() });
     return response.ok;
   } catch {
     return false;
@@ -110,7 +123,7 @@ export async function* postChat(
 ): AsyncGenerator<ChatEvent> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ question }),
     signal,
   });
@@ -132,7 +145,7 @@ export type IngestEvent =
   | { type: "error"; detail: string };
 
 export async function getIngestStatus(): Promise<IngestStatus> {
-  const response = await fetch(`${API_BASE_URL}/ingest/status`);
+  const response = await fetch(`${API_BASE_URL}/ingest/status`, { headers: authHeaders() });
   if (!response.ok) throw new Error(await errorDetail(response));
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
@@ -152,7 +165,10 @@ export async function getIngestStatus(): Promise<IngestStatus> {
 }
 
 export async function postIngest(): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/ingest`, { method: "POST" });
+  const response = await fetch(`${API_BASE_URL}/ingest`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
   if (!response.ok) throw new Error(await errorDetail(response));
 }
 
@@ -184,7 +200,10 @@ function toIngestEvent(frame: SseFrame): IngestEvent {
 export async function* streamIngestProgress(
   signal: AbortSignal,
 ): AsyncGenerator<IngestEvent> {
-  const response = await fetch(`${API_BASE_URL}/ingest/progress`, { signal });
+  const response = await fetch(`${API_BASE_URL}/ingest/progress`, {
+    signal,
+    headers: authHeaders(),
+  });
   if (!response.ok) throw new Error(await errorDetail(response));
   yield* sseEvents(response, toIngestEvent);
 }

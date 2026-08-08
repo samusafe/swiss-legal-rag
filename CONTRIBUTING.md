@@ -60,4 +60,22 @@ Explain the problem, the design choice, tests run, and known limitations. Keep u
 refactors out of feature or security patches. Reviewers should be able to run the stated checks
 without network access, except for explicitly marked integration or model-download steps.
 
+## Releases
+
+This project follows [Semantic Versioning](https://semver.org/). Releases are marked with a Git
+tag on `master`; there is no fixed release cadence — tags are cut when there is a meaningful,
+tested set of changes to ship. Security fixes may be released outside the normal schedule (see
+[SECURITY.md](SECURITY.md)).
+
+## Roadmap
+
+Known future-work items, tracked here rather than in code comments:
+
+- API authentication and rate limiting for non-local deployments
+- Incremental embeddings keyed by content hash
+- Larger human-curated benchmark (100–300 questions per language)
+- Groundedness/entailment checks per citation
+
+Open an issue if you'd like to work on one of these.
+
 By contributing, you agree that your contribution is provided under the repository's MIT license.

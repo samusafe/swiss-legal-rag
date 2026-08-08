@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1152" viewBox="0 0 2048 1152">
+  <defs>
+    <radialGradient id="bgGlow" cx="42%" cy="46%" r="75%">
+      <stop offset="0%" stop-color="#172554"/>
+      <stop offset="55%" stop-color="#0E1730"/>
+      <stop offset="100%" stop-color="#0B1220"/>
+    </radialGradient>
+    <linearGradient id="sheetFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F4F7FC"/>
+      <stop offset="100%" stop-color="#DDE6F3"/>
+    </linearGradient>
+    <linearGradient id="sheetMid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#B9C7DE"/>
+      <stop offset="100%" stop-color="#9FB2CF"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2563EB" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#2563EB" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#2563EB" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="nodeGlow" x="-150%" y="-150%" width="400%" height="400%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="chipGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect width="2048" height="1152" fill="url(#bgGlow)"/>
+
+  <!-- faint structural grid -->
+  <g stroke="#2563EB" stroke-width="1" opacity="0.05">
+    <path d="M256 0V1152M512 0V1152M768 0V1152M1024 0V1152M1280 0V1152M1536 0V1152M1792 0V1152"/>
+    <path d="M0 192H2048M0 384H2048M0 576H2048M0 768H2048M0 960H2048"/>
+  </g>
+
+  <!-- abstract topographic contours (right half) -->
+  <g fill="none" stroke="#FFFFFF" opacity="0.045" stroke-width="1.5">
+    <path d="M1250 980 C1420 900 1500 930 1650 860 C1800 790 1860 830 2048 760"/>
+    <path d="M1200 1030 C1400 950 1520 990 1690 910 C1840 840 1920 880 2048 820"/>
+    <path d="M1300 930 C1450 860 1560 880 1700 810 C1830 745 1900 780 2048 705"/>
+    <path d="M1380 120 C1500 180 1620 150 1760 210 C1890 268 1960 240 2048 290"/>
+    <path d="M1440 70 C1560 130 1700 100 1830 160 C1930 205 1990 185 2048 225"/>
+  </g>
+  <g fill="none" stroke="#2563EB" opacity="0.06" stroke-width="1.5">
+    <path d="M1150 640 C1240 610 1330 660 1430 630 C1560 590 1620 640 1740 610"/>
+    <path d="M1180 700 C1290 665 1370 715 1480 685 C1600 650 1680 700 1800 665"/>
+  </g>
+
+  <!-- very subtle large Swiss cross echo, background top-right -->
+  <g fill="#E30613" opacity="0.04">
+    <rect x="1806" y="96" width="52" height="164" rx="8"/>
+    <rect x="1750" y="152" width="164" height="52" rx="8"/>
+  </g>
+
+  <!-- ========== LEFT: layered law documents ========== -->
+  <g transform="translate(210,300)">
+    <!-- back sheet -->
+    <g transform="rotate(-7 190 250)" filter="url(#softShadow)">
+      <rect x="-34" y="-24" width="356" height="472" rx="14" fill="#31415E" opacity="0.85"/>
+    </g>
+    <!-- middle sheet -->
+    <g transform="rotate(-2.5 190 250)" filter="url(#softShadow)">
+      <rect x="-10" y="-10" width="356" height="472" rx="14" fill="url(#sheetMid)" opacity="0.95"/>
+    </g>
+    <!-- front sheet -->
+    <g transform="rotate(2 190 250)" filter="url(#softShadow)">
+      <rect x="16" y="0" width="356" height="472" rx="14" fill="url(#sheetFront)"/>
+      <!-- red spine accent -->
+      <rect x="16" y="0" width="10" height="472" rx="5" fill="#E30613" opacity="0.9"/>
+      <!-- abstract article blocks: bullet + bars, no readable text -->
+      <g>
+        <rect x="56" y="46" width="150" height="14" rx="7" fill="#334A6B" opacity="0.75"/>
+        <rect x="56" y="86" width="266" height="9" rx="4.5" fill="#8AA0BF" opacity="0.6"/>
+        <rect x="56" y="108" width="238" height="9" rx="4.5" fill="#8AA0BF" opacity="0.6"/>
+        <rect x="56" y="130" width="256" height="9" rx="4.5" fill="#8AA0BF" opacity="0.6"/>
+
+        <rect x="56" y="176" width="12" height="12" rx="3" fill="#E30613"/>
+        <rect x="80" y="177" width="118" height="10" rx="5" fill="#334A6B" opacity="0.7"/>
+        <rect x="56" y="206" width="266" height="9" rx="4.5" fill="#8AA0BF" opacity="0.55"/>
+        <rect x="56" y="228" width="212" height="9" rx="4.5" fill="#8AA0BF" opacity="0.55"/>
+
+        <rect x="56" y="274" width="12" height="12" rx="3" fill="#E30613"/>
+        <rect x="80" y="275" width="96" height="10" rx="5" fill="#334A6B" opacity="0.7"/>
+        <rect x="56" y="304" width="248" height="9" rx="4.5" fill="#8AA0BF" opacity="0.55"/>
+        <rect x="56" y="326" width="266" height="9" rx="4.5" fill="#8AA0BF" opacity="0.55"/>
+        <rect x="56" y="348" width="180" height="9" rx="4.5" fill="#8AA0BF" opacity="0.55"/>
+
+        <!-- citation chips -->
+        <rect x="56" y="398" width="84" height="22" rx="11" fill="#2563EB" opacity="0.22"/>
+        <rect x="150" y="398" width="84" height="22" rx="11" fill="#2563EB" opacity="0.22"/>
+        <rect x="68" y="406" width="60" height="6" rx="3" fill="#2563EB" opacity="0.8"/>
+        <rect x="162" y="406" width="60" height="6" rx="3" fill="#2563EB" opacity="0.8"/>
+      </g>
+      <!-- small elegant Swiss cross seal -->
+      <g transform="translate(316,414)">
+        <circle cx="14" cy="14" r="22" fill="none" stroke="#E30613" stroke-width="2" opacity="0.55"/>
+        <rect x="10" y="4" width="8" height="20" rx="2" fill="#E30613"/>
+        <rect x="4" y="10" width="20" height="8" rx="2" fill="#E30613"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ========== retrieval flow: documents -> nodes -> local AI ========== -->
+  <!-- flowing links -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M640 470 C820 430 950 400 1108 420" stroke="#2563EB" stroke-width="2" opacity="0.35"/>
+    <path d="M640 560 C840 570 990 540 1146 520" stroke="#2563EB" stroke-width="2" opacity="0.3"/>
+    <path d="M640 650 C830 700 1000 660 1170 610" stroke="#2563EB" stroke-width="2" opacity="0.25"/>
+    <path d="M1108 420 C1250 400 1360 430 1478 500" stroke="#7DA2F5" stroke-width="2" opacity="0.4"/>
+    <path d="M1146 520 C1270 520 1370 520 1470 545" stroke="#7DA2F5" stroke-width="2" opacity="0.45"/>
+    <path d="M1170 610 C1290 640 1390 620 1478 585" stroke="#7DA2F5" stroke-width="2" opacity="0.4"/>
+    <path d="M1108 420 C1180 470 1180 560 1146 520" stroke="#2563EB" stroke-width="1.5" opacity="0.2"/>
+    <path d="M1146 520 C1200 560 1210 610 1170 610" stroke="#2563EB" stroke-width="1.5" opacity="0.2"/>
+    <!-- light beam under the flow -->
+    <rect x="660" y="500" width="820" height="90" fill="url(#beam)" opacity="0.10" rx="45"/>
+  </g>
+
+  <!-- retrieval nodes -->
+  <g filter="url(#nodeGlow)">
+    <circle cx="1108" cy="420" r="11" fill="#2563EB"/>
+    <circle cx="1146" cy="520" r="14" fill="#2563EB"/>
+    <circle cx="1170" cy="610" r="9" fill="#2563EB"/>
+    <circle cx="1262" cy="452" r="6" fill="#7DA2F5"/>
+    <circle cx="1298" cy="560" r="7" fill="#7DA2F5"/>
+    <circle cx="1352" cy="500" r="5" fill="#FFFFFF" opacity="0.9"/>
+  </g>
+  <g fill="none" stroke="#FFFFFF" opacity="0.25">
+    <circle cx="1108" cy="420" r="17"/>
+    <circle cx="1146" cy="520" r="21"/>
+    <circle cx="1170" cy="610" r="15"/>
+  </g>
+
+  <!-- local AI chip -->
+  <g transform="translate(1478,462)">
+    <!-- pulse rings -->
+    <circle cx="83" cy="83" r="150" fill="none" stroke="#2563EB" opacity="0.10" stroke-width="1.5"/>
+    <circle cx="83" cy="83" r="190" fill="none" stroke="#2563EB" opacity="0.06" stroke-width="1.5"/>
+    <!-- pins -->
+    <g stroke="#7DA2F5" stroke-width="4" opacity="0.7" stroke-linecap="round">
+      <path d="M40 -14V6M83 -14V6M126 -14V6"/>
+      <path d="M40 160v20M83 160v20M126 160v20"/>
+      <path d="M-14 40H6M-14 83H6M-14 126H6"/>
+      <path d="M160 40h20M160 83h20M160 126h20"/>
+    </g>
+    <!-- body -->
+    <g filter="url(#chipGlow)">
+      <rect x="6" y="6" width="154" height="154" rx="22" fill="#101C36" stroke="#2563EB" stroke-width="2.5"/>
+    </g>
+    <rect x="30" y="30" width="106" height="106" rx="14" fill="none" stroke="#7DA2F5" stroke-width="1.5" opacity="0.55"/>
+    <!-- Swiss cross core (small, on dark — abstract, not a first-aid mark) -->
+    <g fill="#E30613" opacity="0.95">
+      <rect x="76" y="60" width="14" height="46" rx="3"/>
+      <rect x="60" y="76" width="46" height="14" rx="3"/>
+    </g>
+    <circle cx="83" cy="83" r="34" fill="none" stroke="#E30613" stroke-width="1.5" opacity="0.35"/>
+    <!-- lock hint: privacy (small, abstract) -->
+    <g transform="translate(120,118)" opacity="0.85">
+      <rect x="0" y="7" width="22" height="16" rx="4" fill="#FFFFFF" opacity="0.9"/>
+      <path d="M4 8V6a7 7 0 0 1 14 0v2" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.9"/>
+    </g>
+  </g>
+
+  <!-- sparse ambient dots -->
+  <g fill="#FFFFFF">
+    <circle cx="880" cy="220" r="2" opacity="0.25"/>
+    <circle cx="1040" cy="180" r="1.5" opacity="0.2"/>
+    <circle cx="1240" cy="240" r="2" opacity="0.22"/>
+    <circle cx="960" cy="920" r="2" opacity="0.2"/>
+    <circle cx="1120" cy="860" r="1.5" opacity="0.18"/>
+    <circle cx="1420" cy="900" r="2" opacity="0.2"/>
+    <circle cx="1720" cy="380" r="2" opacity="0.25"/>
+    <circle cx="1840" cy="620" r="1.5" opacity="0.2"/>
+  </g>
+
+  <!-- top and bottom hairlines for editorial finish -->
+  <rect x="0" y="0" width="2048" height="2" fill="#2563EB" opacity="0.35"/>
+  <rect x="0" y="1150" width="2048" height="2" fill="#E30613" opacity="0.45"/>
+</svg>

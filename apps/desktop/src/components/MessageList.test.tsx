@@ -189,6 +189,51 @@ describe("MessageList", () => {
     expect(screen.getByText("q")).not.toHaveAttribute("role");
   });
 
+  describe("thinking indicator (VITE_SHOW_THINKING off, the default)", () => {
+    it("renders plain non-interactive dots and label, with no disclosure affordance", () => {
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "", citations: [], error: null }]}
+            streaming={true}
+            searching={true}
+            thinking="checking Art. 335c…"
+            selectedIndex={null}
+            onSelect={vi.fn()}
+          />
+        </HeroUIProvider>,
+      );
+
+      const indicator = screen.getByTestId("thinking-indicator");
+      expect(screen.getByText("Searching articles…")).toBeInTheDocument();
+      expect(indicator).not.toHaveAttribute("role");
+      expect(indicator).not.toHaveAttribute("aria-expanded");
+      expect(indicator).not.toHaveAttribute("tabindex");
+      expect(screen.queryByText("checking Art. 335c…")).not.toBeInTheDocument();
+    });
+
+    it("stays non-interactive on click — no reasoning text appears", async () => {
+      const user = userEvent.setup();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "", citations: [], error: null }]}
+            streaming={true}
+            searching={false}
+            thinking="checking Art. 335c…"
+            selectedIndex={null}
+            onSelect={vi.fn()}
+          />
+        </HeroUIProvider>,
+      );
+
+      await user.click(screen.getByTestId("thinking-indicator"));
+
+      expect(screen.queryByText("checking Art. 335c…")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+  });
+
   describe("a11y", () => {
     it("does not nest the thinking disclosure button inside an interactive bubble while streaming", () => {
       render(
@@ -200,6 +245,7 @@ describe("MessageList", () => {
             thinking=""
             selectedIndex={null}
             onSelect={vi.fn()}
+            showThinking={true}
           />
         </HeroUIProvider>,
       );
@@ -214,7 +260,7 @@ describe("MessageList", () => {
     });
   });
 
-  describe("thinking disclosure", () => {
+  describe("thinking disclosure (VITE_SHOW_THINKING on)", () => {
     it("is collapsed by default and expands on click to show the streamed reasoning", async () => {
       const user = userEvent.setup();
       render(
@@ -229,6 +275,7 @@ describe("MessageList", () => {
             thinking="checking Art. 335c…"
             selectedIndex={null}
             onSelect={vi.fn()}
+            showThinking={true}
           />
         </HeroUIProvider>,
       );
@@ -257,6 +304,7 @@ describe("MessageList", () => {
             thinking=""
             selectedIndex={null}
             onSelect={vi.fn()}
+            showThinking={true}
           />
         </HeroUIProvider>,
       );

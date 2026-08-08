@@ -24,7 +24,7 @@ ingest embed      # chunks -> PostgreSQL/pgvector
 
 `resolve` asks the Fedlex SPARQL endpoint for current versions. `fetch` accepts only HTTPS URLs on `fedlex.data.admin.ch`, streams through a 50 MB limit, writes a temporary file, and atomically replaces the cache. `fetch-meta.json` records the URL and version date, so changed upstream versions are downloaded instead of being mistaken for an existing cache.
 
-`embed` refreshes each act present in the current chunk directory transactionally. This removes revoked or renumbered articles, but recomputes embeddings for the complete act on every refresh — an interrupted rerun re-embeds the affected acts from scratch, not just the rows still missing vectors. Embedding the full corpus (~13k chunks) takes roughly 1-3 hours on a laptop CPU; avoid interrupting a run mid-way.
+`embed` incrementally refreshes each act present in the current chunk directory, transactionally, keyed by content hash (compared as raw text). Unchanged articles keep their existing embeddings and are left untouched; new or changed articles are written with `embedding = NULL` and picked up by the embedding phase; revoked or renumbered articles are deleted. Because only rows with `embedding IS NULL` get re-embedded, an interrupted rerun resumes where it left off instead of starting the affected acts from scratch. Embedding a full initial corpus (~13k chunks) still takes roughly 1-3 hours on a laptop CPU; subsequent runs only pay that cost for what actually changed.
 
 ## Configuration
 

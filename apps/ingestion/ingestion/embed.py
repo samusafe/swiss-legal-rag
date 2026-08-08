@@ -41,9 +41,26 @@ VALUES (%(eli)s, %(part)s, %(sr)s, %(lang)s, %(article)s, %(eid)s, %(heading)s, 
         %(act_name)s, %(abbrev)s, %(version_date)s, %(text)s,
         to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s))
 """
-# No ON CONFLICT clause: upsert_chunks deletes each act's rows before inserting,
-# and _check_no_duplicate_keys already rejects duplicate (eli, part) keys within
-# a batch, so every insert here targets a fresh row.
+# No ON CONFLICT clause: upsert_chunks only reaches this INSERT for (eli, part)
+# keys it already confirmed are absent from the existing-rows lookup, and
+# _check_no_duplicate_keys already rejects duplicate keys within a batch, so
+# every insert here targets a fresh row.
+
+_UPDATE_SQL = """
+UPDATE chunks
+SET sr = %(sr)s, lang = %(lang)s, article = %(article)s, eid = %(eid)s,
+    heading = %(heading)s, context = %(context)s, act_name = %(act_name)s,
+    abbrev = %(abbrev)s, version_date = %(version_date)s, text = %(text)s,
+    tsv = to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s),
+    embedding = NULL
+WHERE eli = %(eli)s AND part = %(part)s
+"""
+# Only reached when the incoming text differs from what's stored, so the old
+# embedding is now stale — reset it to NULL so embed_pending re-embeds this row.
+
+_DELETE_SQL = "DELETE FROM chunks WHERE eli = %s AND part = %s"
+
+_SELECT_EXISTING_SQL = "SELECT eli, part, sr, text FROM chunks WHERE sr = ANY(%s)"
 
 
 def ts_config(lang: str) -> str:
@@ -108,19 +125,50 @@ def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
 
 
 def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
-    # Wholesale-refresh every act present in `chunks`: delete its existing rows first,
-    # then re-insert the current set, all in one transaction. This makes revoked or
-    # renumbered articles disappear atomically instead of accumulating as stale rows
-    # that a pure upsert would never remove.
+    # Incremental upsert keyed by content hash — compared here as the raw text
+    # itself (UTF-8), which is simpler and just as correct as hashing it. For
+    # each act present in `chunks`:
+    #   - (eli, part) keys no longer in the incoming set are deleted (revoked
+    #     or renumbered articles), instead of an act-wide wipe;
+    #   - keys present in both, whose text changed, are updated and their
+    #     embedding is reset to NULL for embed_pending to re-embed;
+    #   - keys present in both with identical text are left untouched, so an
+    #     unchanged article keeps its existing embedding;
+    #   - keys with no existing row are inserted with embedding NULL.
+    # All of this runs in one transaction, so a crash mid-run leaves the
+    # previously committed state intact — same guarantee as before.
     acts = list(dict.fromkeys(chunk.sr for chunk in chunks))
+    chunks_by_act: dict[str, list[Chunk]] = {}
+    for chunk in chunks:
+        chunks_by_act.setdefault(chunk.sr, []).append(chunk)
+
     with conn.cursor() as cur:
-        for sr in acts:
-            cur.execute("DELETE FROM chunks WHERE sr = %s", (sr,))
+        cur.execute(_SELECT_EXISTING_SQL, (acts,))
+        existing: dict[tuple[str, int], tuple[str, str]] = {
+            (eli, part): (sr, text) for eli, part, sr, text in cur.fetchall()
+        }
+
+        for sr, act_chunks in chunks_by_act.items():
+            incoming_keys = {(chunk.eli, chunk.part or 0) for chunk in act_chunks}
+            stale_keys = [
+                key
+                for key, (existing_sr, _existing_text) in existing.items()
+                if existing_sr == sr and key not in incoming_keys
+            ]
+            for eli, part in stale_keys:
+                cur.execute(_DELETE_SQL, (eli, part))
+
         for chunk in chunks:
+            key = (chunk.eli, chunk.part or 0)
             params = chunk.model_dump()
             params["part"] = chunk.part or 0
             params["ts_config"] = ts_config(chunk.lang)
-            cur.execute(_INSERT_SQL, params)
+            prior = existing.get(key)
+            if prior is None:
+                cur.execute(_INSERT_SQL, params)
+            elif prior[1] != chunk.text:
+                cur.execute(_UPDATE_SQL, params)
+            # else: text unchanged — leave row (and its embedding) untouched
     conn.commit()
 
 

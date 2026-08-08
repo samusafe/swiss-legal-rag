@@ -22,12 +22,11 @@ def _try_connect() -> Any:
 
 @pytest.mark.db
 @pytest.mark.skipif(_try_connect() is None, reason="local Postgres not reachable")
-def test_upsert_chunks_wholesale_refreshes_an_act() -> None:
-    # `upsert_chunks` now deletes an act's existing rows before re-inserting the
-    # current set (see ingestion/embed.py), so a rerun both removes stale articles
-    # (revoked/renumbered) and resets embeddings for the whole act, even when a
-    # chunk's text is unchanged — this trades the old row-level resumability
-    # optimization for a guarantee that stale content never lingers (README).
+def test_upsert_chunks_incrementally_refreshes_an_act() -> None:
+    # `upsert_chunks` is incremental, keyed by content hash (see ingestion/embed.py):
+    # a rerun removes stale articles (revoked/renumbered) via a targeted delete,
+    # but leaves an unchanged article's row — and its embedding — untouched. Only
+    # rows whose text actually changed are updated and re-embedded.
     from pgvector.psycopg import register_vector
 
     from ingestion.embed import SCHEMA_SQL, upsert_chunks
@@ -38,8 +37,8 @@ def test_upsert_chunks_wholesale_refreshes_an_act() -> None:
         conn.execute(SCHEMA_SQL)
         register_vector(conn)
         # Use a synthetic SR absent from corpus.yaml so this test's DELETE FROM
-        # chunks WHERE sr = %s can never touch real ingested rows (e.g. SR 220,
-        # the real Code of Obligations) if run against the dev DB.
+        # chunks WHERE eli = %s AND part = %s can never touch real ingested rows
+        # (e.g. SR 220, the real Code of Obligations) if run against the dev DB.
         kept = chunk_for("A › B").model_copy(update={"sr": "999.999"})
         stale = kept.model_copy(
             update={
@@ -51,13 +50,25 @@ def test_upsert_chunks_wholesale_refreshes_an_act() -> None:
         upsert_chunks(conn, [kept, stale])
         conn.execute("UPDATE chunks SET embedding = %s WHERE eli = %s", ([0.5] * 1024, kept.eli))
 
-        # rerun with only `kept`: `stale`'s row (a revoked/renumbered article) is
-        # gone, and `kept`'s embedding is reset despite its text being unchanged.
+        # rerun with only `kept`, text unchanged: `stale`'s row (a revoked/renumbered
+        # article) is gone, but `kept`'s embedding survives since its text didn't change.
         upsert_chunks(conn, [kept])
 
         rows = conn.execute(
             "SELECT eli, embedding IS NULL FROM chunks WHERE sr = %s", (kept.sr,)
         ).fetchall()
         assert {r[0] for r in rows} == {kept.eli}
+        assert rows[0][1] is False
+
+        # rerun again with `kept`'s text changed: its row is updated and the
+        # embedding is reset to NULL so embed_pending re-embeds it.
+        changed = kept.model_copy(update={"text": kept.text + " Amended."})
+        upsert_chunks(conn, [changed])
+
+        rows = conn.execute(
+            "SELECT eli, embedding IS NULL, text FROM chunks WHERE sr = %s", (kept.sr,)
+        ).fetchall()
         assert rows[0][1] is True
+        assert rows[0][2] == changed.text
+
         conn.execute("DELETE FROM chunks WHERE sr = %s", (kept.sr,))

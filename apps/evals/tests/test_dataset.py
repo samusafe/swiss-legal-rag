@@ -113,3 +113,110 @@ def test_expected_sources_entry_bad_shape_raises_value_error_naming_line_number(
 
     with pytest.raises(ValueError, match=r"\b1\b"):
         load_gold(path)
+
+
+def test_unknown_key_raises_value_error_naming_line_and_key(tmp_path):
+    data = _row()
+    data["unexpected_field"] = "surprise"
+    path = _write(tmp_path, json.dumps(data) + "\n")
+
+    with pytest.raises(ValueError, match=r"line 1.*unexpected_field|unexpected_field.*line 1"):
+        load_gold(path)
+
+
+def test_unknown_key_error_names_multiple_offending_keys(tmp_path):
+    data = _row()
+    data["bogus_a"] = 1
+    data["bogus_b"] = 2
+    path = _write(tmp_path, json.dumps(data) + "\n")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_gold(path)
+    assert "bogus_a" in str(excinfo.value)
+    assert "bogus_b" in str(excinfo.value)
+
+
+def test_expected_source_ids_is_accepted_optional_key(tmp_path):
+    data = _row(expected_source_ids=["upstream-id-1", "upstream-id-2"])
+    path = _write(tmp_path, json.dumps(data) + "\n")
+
+    questions = load_gold(path)
+
+    assert questions[0].expected_source_ids == ("upstream-id-1", "upstream-id-2")
+
+
+def test_expected_source_ids_defaults_to_empty_tuple_when_absent(tmp_path):
+    path = _write(tmp_path, json.dumps(_row()) + "\n")
+
+    questions = load_gold(path)
+
+    assert questions[0].expected_source_ids == ()
+
+
+def test_expected_source_ids_bare_string_raises_value_error(tmp_path):
+    data = _row(expected_source_ids="not-a-list")
+    path = _write(tmp_path, json.dumps(data) + "\n")
+
+    with pytest.raises(ValueError, match=r"\b1\b"):
+        load_gold(path)
+
+
+def test_duplicate_id_raises_value_error_naming_both_line_numbers(tmp_path):
+    row1 = json.dumps(_row(id="dup"))
+    row2 = json.dumps(_row(id="dup", question="A different question?"))
+    path = _write(tmp_path, f"{row1}\n{row2}\n")
+
+    with pytest.raises(ValueError, match=r"\b1\b.*\b2\b|\b2\b.*\b1\b"):
+        load_gold(path)
+
+
+def test_blank_id_raises_value_error_naming_line_number(tmp_path):
+    path = _write(tmp_path, json.dumps(_row(id="   ")) + "\n")
+
+    with pytest.raises(ValueError, match=r"\b1\b"):
+        load_gold(path)
+
+
+def test_blank_question_raises_value_error_naming_line_number(tmp_path):
+    path = _write(tmp_path, json.dumps(_row(question="")) + "\n")
+
+    with pytest.raises(ValueError, match=r"\b1\b"):
+        load_gold(path)
+
+
+def test_permissive_mode_skips_bad_rows_and_logs_to_stderr(tmp_path, capsys):
+    good = json.dumps(_row(id="good"))
+    bad = json.dumps(_row(id="bad", lang="en"))
+    path = _write(tmp_path, f"{good}\n{bad}\n")
+
+    questions = load_gold(path, permissive=True)
+
+    assert [q.id for q in questions] == ["good"]
+    captured = capsys.readouterr()
+    assert "skipping line 2" in captured.err
+
+
+def test_permissive_mode_still_enforces_strict_rules_on_valid_rows(tmp_path):
+    good = json.dumps(_row(id="good"))
+    path = _write(tmp_path, f"{good}\n")
+
+    questions = load_gold(path, permissive=True)
+
+    assert len(questions) == 1
+
+
+def test_permissive_mode_raises_when_no_valid_rows_remain(tmp_path):
+    bad = json.dumps(_row(lang="en"))
+    path = _write(tmp_path, f"{bad}\n")
+
+    with pytest.raises(ValueError):
+        load_gold(path, permissive=True)
+
+
+def test_strict_mode_still_raises_on_first_bad_row_by_default(tmp_path):
+    good = json.dumps(_row(id="good"))
+    bad = json.dumps(_row(id="bad", lang="en"))
+    path = _write(tmp_path, f"{good}\n{bad}\n")
+
+    with pytest.raises(ValueError, match=r"\b2\b"):
+        load_gold(path)

@@ -190,6 +190,154 @@ def test_main_counts_metric_changes_not_rows(tmp_path: Path, capsys):
     assert exit_code == 0
 
 
+def _write_result(path: Path, rows: list[dict], run_manifest: dict | None = None) -> None:
+    result = _result(rows)
+    if run_manifest is not None:
+        result["run_manifest"] = run_manifest
+    path.write_text(json.dumps(result), encoding="utf-8")
+
+
+def test_latest_picks_two_most_recent_eval_files_in_out_dir(tmp_path: Path, capsys):
+    out_dir = tmp_path / "results"
+    out_dir.mkdir()
+
+    oldest = out_dir / "eval_retrieval_20260101-000000.json"
+    middle = out_dir / "eval_retrieval_20260102-000000.json"
+    newest = out_dir / "eval_retrieval_20260103-000000.json"
+
+    _write_result(oldest, [_row("q1", hit=True)])
+    _write_result(middle, [_row("q1", hit=True)])
+    _write_result(newest, [_row("q1", hit=False)])
+
+    # mtime, not filename, drives ordering -- stamp them explicitly so the
+    # test doesn't depend on write-call speed.
+    import os
+    import time
+
+    now = time.time()
+    os.utime(oldest, (now - 300, now - 300))
+    os.utime(middle, (now - 200, now - 200))
+    os.utime(newest, (now - 100, now - 100))
+
+    exit_code = main(["--latest", "--out-dir", str(out_dir)])
+
+    captured = capsys.readouterr()
+    assert "q1: hit True -> False" in captured.out
+    assert exit_code == 0
+
+
+def test_latest_errors_clearly_when_fewer_than_two_files_present(tmp_path: Path, capsys):
+    out_dir = tmp_path / "results"
+    out_dir.mkdir()
+    _write_result(out_dir / "eval_retrieval_20260101-000000.json", [_row("q1", hit=True)])
+
+    exit_code = main(["--latest", "--out-dir", str(out_dir)])
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert "eval_*.json" in captured.out or "eval_*.json" in captured.err
+
+
+def test_latest_errors_clearly_when_out_dir_does_not_exist(tmp_path: Path, capsys):
+    missing = tmp_path / "does-not-exist"
+
+    exit_code = main(["--latest", "--out-dir", str(missing)])
+
+    assert exit_code != 0
+
+
+def test_main_requires_paths_when_latest_not_given(tmp_path: Path, capsys):
+    exit_code = main([])
+
+    assert exit_code != 0
+
+
+def test_main_warns_when_chat_model_differs_between_runs(tmp_path: Path, capsys):
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    _write_result(
+        old_path,
+        [_row("q1", hit=True)],
+        run_manifest={"chat_model": "qwen3:8b", "eval_set_sha256": "abc"},
+    )
+    _write_result(
+        new_path,
+        [_row("q1", hit=True)],
+        run_manifest={"chat_model": "qwen3:14b", "eval_set_sha256": "abc"},
+    )
+
+    exit_code = main([str(old_path), str(new_path)])
+
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.out
+    assert exit_code == 0
+
+
+def test_main_warns_when_eval_set_sha256_differs_between_runs(tmp_path: Path, capsys):
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    _write_result(
+        old_path,
+        [_row("q1", hit=True)],
+        run_manifest={"chat_model": "qwen3:8b", "eval_set_sha256": "abc"},
+    )
+    _write_result(
+        new_path,
+        [_row("q1", hit=True)],
+        run_manifest={"chat_model": "qwen3:8b", "eval_set_sha256": "def"},
+    )
+
+    exit_code = main([str(old_path), str(new_path)])
+
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.out
+    assert exit_code == 0
+
+
+def test_main_no_warning_when_manifests_match(tmp_path: Path, capsys):
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    manifest = {"chat_model": "qwen3:8b", "eval_set_sha256": "abc"}
+    _write_result(old_path, [_row("q1", hit=True)], run_manifest=manifest)
+    _write_result(new_path, [_row("q1", hit=True)], run_manifest=dict(manifest))
+
+    exit_code = main([str(old_path), str(new_path)])
+
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.out
+    assert exit_code == 0
+
+
+def test_main_no_warning_or_crash_when_run_manifest_absent(tmp_path: Path, capsys):
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    _write_result(old_path, [_row("q1", hit=True)])
+    _write_result(new_path, [_row("q1", hit=True)])
+
+    exit_code = main([str(old_path), str(new_path)])
+
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.out
+    assert exit_code == 0
+
+
+def test_main_no_warning_when_only_one_side_has_run_manifest(tmp_path: Path, capsys):
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    _write_result(old_path, [_row("q1", hit=True)])
+    _write_result(
+        new_path,
+        [_row("q1", hit=True)],
+        run_manifest={"chat_model": "qwen3:8b", "eval_set_sha256": "abc"},
+    )
+
+    exit_code = main([str(old_path), str(new_path)])
+
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.out
+    assert exit_code == 0
+
+
 def test_main_compared_count_excludes_only_in_old_and_only_in_new(
     tmp_path: Path, capsys
 ):

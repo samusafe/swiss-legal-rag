@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "./api";
 import { getHealth, postChat } from "./api";
 
@@ -182,6 +182,72 @@ describe("postIngest", () => {
       ),
     );
     await expect(postIngest()).rejects.toThrow("an ingest run is already active");
+  });
+});
+
+describe("X-API-Key header (VITE_API_KEY)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is omitted from every request when VITE_API_KEY is unset (default)", async () => {
+    const api = await import("./api");
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"status": "ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getHealth();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).not.toHaveProperty("X-API-Key");
+  });
+
+  it("is sent on postChat when VITE_API_KEY is set", async () => {
+    vi.stubEnv("VITE_API_KEY", "secret-key");
+    const api = await import("./api");
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(""));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for await (const _event of api.postChat("q", new AbortController().signal)) {
+      // drain the stream
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/chat",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-API-Key": "secret-key" }),
+      }),
+    );
+  });
+
+  it("is sent on getHealth, getIngestStatus, postIngest, and streamIngestProgress when set", async () => {
+    vi.stubEnv("VITE_API_KEY", "secret-key");
+    const api = await import("./api");
+    // A fresh Response per call: bodies can only be read/streamed once.
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          '{"running": false, "phase": null, "acts": 0, "chunks_total": 0, "chunks_embedded": 0}',
+          { status: 200 },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getHealth();
+    await api.getIngestStatus();
+    await api.postIngest();
+    for await (const _event of api.streamIngestProgress(new AbortController().signal)) {
+      // drain
+    }
+
+    for (const call of fetchMock.mock.calls) {
+      const [, init] = call as [string, RequestInit];
+      expect(init.headers).toEqual(expect.objectContaining({ "X-API-Key": "secret-key" }));
+    }
   });
 });
 

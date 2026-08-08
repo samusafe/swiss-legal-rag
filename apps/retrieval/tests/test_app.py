@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from retrieval.app import create_app
 from retrieval.search import SearchDeps
+from retrieval.security import RateLimiter
 from tests.test_search import A, deps_with
 
 
@@ -38,6 +39,62 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_ready_returns_200_when_all_checks_pass(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.check_postgres", lambda settings: True)
+    monkeypatch.setattr("retrieval.app.check_ollama", lambda client, settings: True)
+    monkeypatch.setattr("retrieval.app.check_corpus", lambda settings: True)
+    with _client(deps_with([])) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ready": True,
+        "checks": {"postgres": True, "ollama": True, "corpus": True},
+    }
+
+
+def test_ready_returns_503_when_postgres_check_fails(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.check_postgres", lambda settings: False)
+    monkeypatch.setattr("retrieval.app.check_ollama", lambda client, settings: True)
+    monkeypatch.setattr("retrieval.app.check_corpus", lambda settings: True)
+    with _client(deps_with([])) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ready": False,
+        "checks": {"postgres": False, "ollama": True, "corpus": True},
+    }
+
+
+def test_ready_returns_503_when_ollama_check_fails(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.check_postgres", lambda settings: True)
+    monkeypatch.setattr("retrieval.app.check_ollama", lambda client, settings: False)
+    monkeypatch.setattr("retrieval.app.check_corpus", lambda settings: True)
+    with _client(deps_with([])) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ready": False,
+        "checks": {"postgres": True, "ollama": False, "corpus": True},
+    }
+
+
+def test_ready_returns_503_when_corpus_check_fails(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.check_postgres", lambda settings: True)
+    monkeypatch.setattr("retrieval.app.check_ollama", lambda client, settings: True)
+    monkeypatch.setattr("retrieval.app.check_corpus", lambda settings: False)
+    with _client(deps_with([])) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ready": False,
+        "checks": {"postgres": True, "ollama": True, "corpus": False},
+    }
 
 
 def test_cors_allows_desktop_webview_origins() -> None:
@@ -288,6 +345,168 @@ def test_chat_rejects_unsupported_lang() -> None:
         response = client.post("/chat", json={"question": "frage", "lang": "en"})
 
     assert response.status_code == 422
+
+
+def test_search_stays_open_when_api_key_is_unset() -> None:
+    with _client(deps_with([])) as client:
+        response = client.post("/search", json={"q": "frage", "lang": "de"})
+
+    assert response.status_code == 200
+
+
+def test_search_requires_api_key_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        no_header = client.post("/search", json={"q": "frage", "lang": "de"})
+        wrong_header = client.post(
+            "/search", json={"q": "frage", "lang": "de"}, headers={"X-API-Key": "wrong"}
+        )
+        correct_header = client.post(
+            "/search", json={"q": "frage", "lang": "de"}, headers={"X-API-Key": "secret-key"}
+        )
+
+    assert no_header.status_code == 401
+    assert no_header.json() == {"detail": "invalid or missing API key"}
+    assert wrong_header.status_code == 401
+    assert correct_header.status_code == 200
+
+
+def test_chat_requires_api_key_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        no_header = client.post("/chat", json={"question": "frage", "lang": "de"})
+        correct_header = client.post(
+            "/chat",
+            json={"question": "frage", "lang": "de"},
+            headers={"X-API-Key": "secret-key"},
+        )
+
+    assert no_header.status_code == 401
+    assert correct_header.status_code == 200
+
+
+def test_ingest_endpoints_require_api_key_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    monkeypatch.setattr(
+        "retrieval.app.ingest_status", lambda state, url: {"running": False}
+    )
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        no_header = client.get("/ingest/status")
+        correct_header = client.get("/ingest/status", headers={"X-API-Key": "secret-key"})
+
+    assert no_header.status_code == 401
+    assert correct_header.status_code == 200
+
+
+def test_health_and_ready_stay_open_when_api_key_configured(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    monkeypatch.setattr("retrieval.app.check_postgres", lambda settings: True)
+    monkeypatch.setattr("retrieval.app.check_ollama", lambda client, settings: True)
+    monkeypatch.setattr("retrieval.app.check_corpus", lambda settings: True)
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        health = client.get("/health")
+        ready = client.get("/ready")
+
+    assert health.status_code == 200
+    assert ready.status_code == 200
+
+
+def test_search_rate_limit_disabled_by_default_allows_bursts() -> None:
+    with _client(deps_with([])) as client:
+        responses = [
+            client.post("/search", json={"q": "frage", "lang": "de"}) for _ in range(20)
+        ]
+
+    assert all(r.status_code == 200 for r in responses)
+
+
+def test_cors_preflight_succeeds_when_api_key_configured(monkeypatch) -> None:
+    # enforce_security must not sit outside CORSMiddleware: a preflight OPTIONS
+    # carries no X-API-Key header, so if security ran first it would 401 every
+    # cross-origin request before CORS ever got a chance to answer it.
+    monkeypatch.setenv("API_KEY", "secret-key")
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        response = client.options(
+            "/chat",
+            headers={
+                "Origin": "http://localhost:1420",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:1420"
+
+
+def test_cors_headers_present_on_401_response(monkeypatch) -> None:
+    # A 401 from enforce_security must still carry CORS headers, or the desktop
+    # webview's fetch() rejects it as a CORS failure instead of surfacing the 401.
+    monkeypatch.setenv("API_KEY", "secret-key")
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        response = client.post(
+            "/search",
+            json={"q": "frage", "lang": "de"},
+            headers={"Origin": "http://localhost:1420"},
+        )
+
+    assert response.status_code == 401
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:1420"
+
+
+def test_search_rate_limited_after_burst_then_refills_with_fake_clock() -> None:
+    clock = {"t": 0.0}
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.rate_limiter = RateLimiter(2, clock=lambda: clock["t"])
+    with TestClient(app) as client:
+        first = client.post("/search", json={"q": "frage", "lang": "de"})
+        second = client.post("/search", json={"q": "frage", "lang": "de"})
+        third = client.post("/search", json={"q": "frage", "lang": "de"})
+        clock["t"] += 30.0  # half the window at 2/min = 1 token refilled
+        fourth = client.post("/search", json={"q": "frage", "lang": "de"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert third.json() == {"detail": "rate limit exceeded"}
+    assert fourth.status_code == 200
+
+
+def test_rate_limit_shared_across_rate_limited_post_endpoints() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.rate_limiter = RateLimiter(1, clock=lambda: 0.0)
+    with TestClient(app) as client:
+        first = client.post("/search", json={"q": "frage", "lang": "de"})
+        second = client.post("/ingest")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_rate_limit_does_not_apply_to_get_endpoints(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "retrieval.app.ingest_status", lambda state, url: {"running": False}
+    )
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.rate_limiter = RateLimiter(1, clock=lambda: 0.0)
+    with TestClient(app) as client:
+        responses = [client.get("/ingest/status") for _ in range(5)]
+
+    assert all(r.status_code == 200 for r in responses)
 
 
 def test_chat_reuses_lazy_httpx_client_across_requests(monkeypatch) -> None:

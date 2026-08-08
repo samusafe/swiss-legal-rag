@@ -70,13 +70,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Enable pnpm via corepack
-        run: corepack enable
+      # Install the exact package-manager version before setup-node asks pnpm
+      # for its store path while configuring the dependency cache. Relying on
+      # the runner's Corepack default can select a newer pnpm incompatible
+      # with the requested Node version.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.12.x"
+          node-version: "22.13.1"
           cache: pnpm
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
 

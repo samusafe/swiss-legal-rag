@@ -8,11 +8,27 @@ from collections.abc import Iterator
 import httpx
 
 
+def auth_headers(api_key: str | None) -> dict[str, str]:
+    """`X-API-Key` header to send, when the retrieval API requires one.
+
+    Empty/`None` `api_key` (the retrieval API's `API_KEY` unset) yields no
+    header at all, matching the API's own opt-in-auth behavior.
+    """
+    return {"X-API-Key": api_key} if api_key else {}
+
+
 def search(
-    client: httpx.Client, base_url: str, question: str, lang: str, k: int
+    client: httpx.Client,
+    base_url: str,
+    question: str,
+    lang: str,
+    k: int,
+    api_key: str | None = None,
 ) -> list[dict]:
     response = client.post(
-        f"{base_url}/search", json={"q": question, "lang": lang, "k": k}
+        f"{base_url}/search",
+        json={"q": question, "lang": lang, "k": k},
+        headers=auth_headers(api_key),
     )
     response.raise_for_status()
     return response.json()["results"]
@@ -27,10 +43,17 @@ def _iter_sse_events(text: str) -> Iterator[tuple[str, dict]]:
 
 
 def chat(
-    client: httpx.Client, base_url: str, question: str, lang: str, k: int
+    client: httpx.Client,
+    base_url: str,
+    question: str,
+    lang: str,
+    k: int,
+    api_key: str | None = None,
 ) -> tuple[str, list[dict]]:
     response = client.post(
-        f"{base_url}/chat", json={"question": question, "lang": lang, "k": k}
+        f"{base_url}/chat",
+        json={"question": question, "lang": lang, "k": k},
+        headers=auth_headers(api_key),
     )
     if response.status_code != 200:
         raise RuntimeError(

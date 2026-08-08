@@ -15,6 +15,7 @@ vi.mock("./lib/api", () => ({
   }),
   postIngest: vi.fn(),
   streamIngestProgress: vi.fn(),
+  SHOW_THINKING: false,
 }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),

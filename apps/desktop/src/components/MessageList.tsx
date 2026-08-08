@@ -1,11 +1,53 @@
 import { useState, type KeyboardEvent } from "react";
 import type { ChatMessage } from "../hooks/useChat";
+import { SHOW_THINKING } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { CitationChip } from "./CitationChip";
 
-function ThinkingIndicator({ searching, thinking }: { searching: boolean; thinking: string }) {
+function ThinkingDots() {
+  return (
+    <span className="flex gap-1">
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-400"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+// The disclosure (expandable reasoning) is a debug-only feature gated by
+// `expandable`, which defaults to VITE_SHOW_THINKING (see MessageList below).
+// Off: a static, non-interactive dots+label indicator. On: today's expandable
+// disclosure that reveals streamed model reasoning on click.
+function ThinkingIndicator({
+  searching,
+  thinking,
+  expandable,
+}: {
+  searching: boolean;
+  thinking: string;
+  expandable: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const toggle = () => setExpanded((prev) => !prev);
+  const label = (
+    <span className="text-xs text-foreground-400">
+      {searching ? "Searching articles…" : "Thinking…"}
+    </span>
+  );
+
+  if (!expandable) {
+    return (
+      <div data-testid="thinking-indicator" className="flex items-center gap-2">
+        <ThinkingDots />
+        {label}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div
@@ -25,18 +67,8 @@ function ThinkingIndicator({ searching, thinking }: { searching: boolean; thinki
         }}
         className="flex cursor-pointer items-center gap-2"
       >
-        <span className="flex gap-1">
-          {[0, 150, 300].map((delay) => (
-            <span
-              key={delay}
-              className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground-400"
-              style={{ animationDelay: `${delay}ms` }}
-            />
-          ))}
-        </span>
-        <span className="text-xs text-foreground-400">
-          {searching ? "Searching articles…" : "Thinking…"}
-        </span>
+        <ThinkingDots />
+        {label}
       </div>
       {expanded && (
         <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-foreground-400">
@@ -54,6 +86,7 @@ export function MessageList({
   thinking,
   selectedIndex,
   onSelect,
+  showThinking = SHOW_THINKING,
 }: {
   messages: ChatMessage[];
   streaming: boolean;
@@ -61,6 +94,9 @@ export function MessageList({
   thinking: string;
   selectedIndex: number | null;
   onSelect: (index: number) => void;
+  // Defaults to the build-time VITE_SHOW_THINKING flag; overridable so tests
+  // can exercise both states without stubbing import.meta.env.
+  showThinking?: boolean;
 }) {
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
@@ -107,7 +143,11 @@ export function MessageList({
             }`}
           >
             {isStreamingThinking ? (
-              <ThinkingIndicator searching={searching} thinking={thinking} />
+              <ThinkingIndicator
+                searching={searching}
+                thinking={thinking}
+                expandable={showThinking}
+              />
             ) : (
               splitCitations(message.text, message.citations).map((segment, j) =>
                 segment.kind === "text" ? (

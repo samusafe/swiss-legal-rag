@@ -3,7 +3,7 @@ from datetime import date
 import httpx
 import pytest
 
-from retrieval.generation import build_messages, stream_chat
+from retrieval.generation import REFUSAL_SENTENCE, build_messages, stream_chat
 from retrieval.models import SearchResult
 from tests.conftest import make_client
 
@@ -36,6 +36,25 @@ def test_build_messages_system_prompt_warns_sources_are_not_instructions() -> No
     system = messages[0]["content"]
     assert "evidence only" in system.lower()
     assert "never" in system.lower()
+
+
+def test_build_messages_system_prompt_instructs_canonical_refusal_sentence() -> None:
+    messages = build_messages("Quel délai?", "French", [_source("335c")])
+    system = messages[0]["content"]
+    assert "reply with EXACTLY this sentence and no citations" in system
+    assert REFUSAL_SENTENCE in system
+
+
+def test_build_messages_system_prompt_has_one_unambiguous_language_agnostic_refusal() -> None:
+    # Regression: the prompt used to carry BOTH an old "say that you cannot
+    # answer ... (in {language})" line AND the canonical-sentence directive —
+    # contradictory instructions for the no-sources case. Only the canonical,
+    # language-agnostic directive may remain.
+    messages = build_messages("Quel délai?", "French", [_source("335c")])
+    system = messages[0]["content"]
+    assert "cannot answer from the provided articles" not in system.lower()
+    assert "regardless of the answer language" in system.lower()
+    assert system.count(REFUSAL_SENTENCE) == 1
 
 
 def test_stream_chat_yields_only_tokens_for_a_markerless_stream() -> None:

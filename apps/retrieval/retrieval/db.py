@@ -30,7 +30,9 @@ def connect(settings: Settings) -> psycopg.Connection:
     # autocommit: this is a read-only query connection, held for the process
     # lifetime. Without it, one failed query leaves it idle-in-transaction and
     # every later request 503s until the process is restarted.
-    conn = psycopg.connect(settings.database_url, autocommit=True)
+    # connect_timeout: without it a down/restarting Postgres blocks app startup
+    # forever with no error ("Waiting for application startup." hangs silently).
+    conn = psycopg.connect(settings.database_url, autocommit=True, connect_timeout=10)
     register_vector(conn)
     return conn
 

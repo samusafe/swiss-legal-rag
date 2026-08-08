@@ -6,7 +6,7 @@ FastAPI service exposing hybrid search and RAG chat over the Swiss federal law c
 
 1. Postgres with pgvector, running and embedded: `docker compose up -d` (from repo root), then `ingest embed` from `apps/ingestion` — see [`apps/ingestion/README.md`](../ingestion/README.md).
 2. Ollama running with the embedding and chat models pulled: `ollama pull bge-m3`, `ollama pull qwen2.5:3b-instruct`, then `ollama serve` (or the desktop app).
-3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`, `INGESTION_PYTHON` (optional: path to ingestion venv, auto-derived from `apps/ingestion/.venv` when unset).
+3. Configuration from `.env` at the repo root (`cp .env.example .env` if you haven't) — `DATABASE_URL`, `OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `OLLAMA_CHAT_MODEL`, `INGESTION_PYTHON` (optional: path to ingestion venv, auto-derived from `apps/ingestion/.venv` when unset), plus the optional `RERANKER_REVISION`, `API_KEY`, and `RATE_LIMIT_PER_MINUTE` covered below.
 
 ## Setup
 
@@ -41,14 +41,44 @@ The reranker model loads lazily on the first request to `/search` or `/chat`, so
 ## Security
 
 This service is designed to run entirely on localhost, alongside Postgres and Ollama, for a
-single trusted user (the desktop app on the same machine). It has **no authentication or
-authorization** — anyone who can reach the port can query it and trigger ingestion. Do not
-expose it beyond `127.0.0.1`, and do not put it behind a reverse proxy without adding your own
-auth layer first.
+single trusted user (the desktop app on the same machine). Authentication and rate limiting are
+**opt-in and off by default** — with both unset, the API behaves exactly as an unauthenticated,
+unthrottled local service. Do not expose it beyond `127.0.0.1`, and do not put it behind a
+reverse proxy without adding your own auth layer first; the options below are a local safety net,
+not a substitute for a real API gateway in a shared deployment.
+
+| Setting | Env var | Default | Effect |
+| --- | --- | --- | --- |
+| API key | `API_KEY` | unset (no auth) | When set, every endpoint except `GET /health` and `GET /ready` requires a matching `X-API-Key` header, or the request gets `401 {"detail": "invalid or missing API key"}`. The desktop app's matching `VITE_API_KEY` build variable sends this header automatically (see `apps/desktop/README.md`). |
+| Rate limit | `RATE_LIMIT_PER_MINUTE` | `0` (disabled) | When > 0, an in-memory token bucket per client IP throttles `POST /search`, `POST /chat`, and `POST /ingest` (GET status/progress/health/ready are never throttled). Over the limit returns `429 {"detail": "rate limit exceeded"}`. |
+
+The rate limiter's state lives in this process's memory only — it does not coordinate across
+multiple processes or workers. Run the API as a single `uvicorn` process (as shown above, with no
+`--workers` flag); a multi-worker or multi-instance deployment needs a real gateway (e.g. an
+nginx/Envoy layer or Redis-backed limiter) in front of it, not this in-memory bucket.
+
+The limiter also keeps a small counter per client IP for the lifetime of the process, with no
+eviction — harmless for a local single-user deployment (one or two IPs, ever), but unbounded if
+the API is ever reachable from many unique IPs, where a fronting gateway is recommended instead.
 
 The reranker (`RERANKER_MODEL`, `BAAI/bge-reranker-v2-m3` by default) downloads its weights from
 Hugging Face on first use — a one-time network call the first time `/search` or `/chat` runs
 against a fresh install; after that, everything is local and offline.
+
+## Reproducibility
+
+- **Dependencies** are exact-pinned in `pyproject.toml` (`==`), captured from a known-good
+  `pip freeze`. Development tools (`pytest`, `ruff`, `mypy`) stay on `>=` ranges.
+- **Reranker weights**: set `RERANKER_REVISION` to a Hugging Face commit hash or tag to pin the
+  exact `RERANKER_MODEL` weights (passed to `CrossEncoder(..., revision=...)`). Unset (default)
+  resolves to the model repo's current default revision, which can change over time — look up the
+  commit hash on the model's Hugging Face "Files and versions" page and pin it there for a fully
+  reproducible reranker.
+- **Ollama models**: model *tags* (e.g. `qwen2.5:3b-instruct`, `bge-m3`) are not immutable —
+  publishers can repoint a tag to new weights. For a byte-identical pin, resolve the tag to its
+  content digest (`ollama show <tag> --modelfile` or the digest shown by `ollama list`) and pull
+  by digest (`ollama pull <model>@sha256:<digest>`) instead of by tag when reproducibility across
+  machines matters.
 
 ## API
 
@@ -61,6 +91,20 @@ curl -s http://localhost:8000/health
 ```json
 { "status": "ok" }
 ```
+
+Static liveness probe — always `200` once the process is up.
+
+### `GET /ready`
+
+```
+curl -s http://localhost:8000/ready
+```
+
+```json
+{ "ready": true, "checks": { "postgres": true, "ollama": true, "corpus": true } }
+```
+
+Readiness probe: checks Postgres (`SELECT 1`), Ollama (`GET /api/tags` has both the configured chat and embedding models pulled), and the corpus (at least one embedded chunk). Returns `200` when every check passes, `503` with the same shape (and the failing checks set to `false`) otherwise. A failed check never raises — it just reports `false`.
 
 ### `POST /search`
 

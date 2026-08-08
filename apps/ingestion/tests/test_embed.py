@@ -89,37 +89,144 @@ def test_load_chunks_reports_all_collisions(tmp_path: Path) -> None:
     assert message.count("articles") == 2  # both collisions listed, not just the first
 
 
-def test_upsert_chunks_deletes_stale_rows_before_inserting() -> None:
-    from ingestion.embed import upsert_chunks
-
+def _mock_conn() -> tuple[MagicMock, MagicMock]:
     cursor = MagicMock()
     conn = MagicMock()
     conn.cursor.return_value.__enter__.return_value = cursor
+    return conn, cursor
 
-    chunks = [
-        chunk_for(None),
-        chunk_for(None).model_copy(
-            update={
-                "sr": "221",
-                "eid": "art_1",
-                "article": "1",
-                "eli": "https://www.fedlex.admin.ch/eli/cc/other/de#art_1",
-            }
-        ),
+
+def test_upsert_chunks_leaves_unchanged_row_untouched() -> None:
+    from ingestion.embed import upsert_chunks
+
+    conn, cursor = _mock_conn()
+    chunk = chunk_for(None)
+    cursor.fetchall.return_value = [(chunk.eli, 0, chunk.sr, chunk.text)]
+
+    upsert_chunks(conn, [chunk])
+
+    mutating = [
+        call for call in cursor.execute.call_args_list
+        if not call.args[0].strip().startswith("SELECT")
+    ]
+    # text is identical to what's stored — no DELETE/UPDATE/INSERT touches this
+    # row, so its embedding (whatever it is) is left exactly as-is.
+    assert mutating == []
+    conn.commit.assert_called_once()
+
+
+def test_upsert_chunks_updates_changed_text_and_resets_embedding() -> None:
+    from ingestion.embed import upsert_chunks
+
+    conn, cursor = _mock_conn()
+    chunk = chunk_for(None).model_copy(update={"text": "Art. 335c\n1 Amended."})
+    cursor.fetchall.return_value = [(chunk.eli, 0, chunk.sr, "Art. 335c\n1 Inhalt.")]
+
+    upsert_chunks(conn, [chunk])
+
+    update_calls = [
+        call for call in cursor.execute.call_args_list
+        if call.args[0].strip().startswith("UPDATE")
+    ]
+    assert len(update_calls) == 1
+    sql, params = update_calls[0].args
+    assert "embedding = NULL" in sql
+    assert params["eli"] == chunk.eli
+    assert params["part"] == 0
+    assert params["text"] == chunk.text
+    conn.commit.assert_called_once()
+
+
+def test_upsert_chunks_deletes_vanished_key_only() -> None:
+    from ingestion.embed import upsert_chunks
+
+    conn, cursor = _mock_conn()
+    kept = chunk_for(None)
+    vanished_eli = kept.eli.replace("art_335_c", "art_336")
+    cursor.fetchall.return_value = [
+        (kept.eli, 0, kept.sr, kept.text),
+        (vanished_eli, 0, kept.sr, "Art. 336\n1 Repealed content."),
     ]
 
-    upsert_chunks(conn, chunks)
+    upsert_chunks(conn, [kept])
 
-    sqls = [call.args[0].strip() for call in cursor.execute.call_args_list]
-    delete_sqls = [(i, sql) for i, sql in enumerate(sqls) if sql.startswith("DELETE FROM chunks")]
-    insert_sqls = [(i, sql) for i, sql in enumerate(sqls) if sql.startswith("INSERT INTO chunks")]
-    delete_srs = {cursor.execute.call_args_list[i].args[1][0] for i, _ in delete_sqls}
-
-    assert delete_srs == {"220", "221"}
-    assert len(insert_sqls) == 2
-    # every act's stale rows are gone before any replacement row lands, all inside
-    # the same transaction — revoked/renumbered articles disappear atomically
-    assert max(i for i, _ in delete_sqls) < min(i for i, _ in insert_sqls)
+    delete_calls = [
+        call for call in cursor.execute.call_args_list
+        if call.args[0].strip().startswith("DELETE")
+    ]
+    assert len(delete_calls) == 1
+    sql, params = delete_calls[0].args
+    assert params == (vanished_eli, 0)
     conn.commit.assert_called_once()
+
+
+def test_upsert_chunks_inserts_new_row() -> None:
+    from ingestion.embed import upsert_chunks
+
+    conn, cursor = _mock_conn()
+    cursor.fetchall.return_value = []
+    chunk = chunk_for(None)
+
+    upsert_chunks(conn, [chunk])
+
+    insert_calls = [
+        call for call in cursor.execute.call_args_list
+        if call.args[0].strip().startswith("INSERT")
+    ]
+    assert len(insert_calls) == 1
+    sql, params = insert_calls[0].args
+    assert "embedding" not in sql  # column omitted entirely -> stays NULL
+    assert params["eli"] == chunk.eli
+    assert params["part"] == 0
+    conn.commit.assert_called_once()
+
+
+def test_upsert_chunks_selective_changes_in_one_transaction() -> None:
+    from ingestion.embed import upsert_chunks
+
+    conn, cursor = _mock_conn()
+
+    unchanged = chunk_for(None)
+    changed = chunk_for(None).model_copy(
+        update={
+            "article": "335a",
+            "eid": "art_335a",
+            "eli": unchanged.eli.replace("335_c", "335_a"),
+            "text": "Art. 335a\n1 New wording.",
+        }
+    )
+    new_chunk = chunk_for(None).model_copy(
+        update={
+            "sr": "221",
+            "article": "1",
+            "eid": "art_1",
+            "eli": "https://www.fedlex.admin.ch/eli/cc/other/de#art_1",
+        }
+    )
+    vanished_eli = unchanged.eli.replace("335_c", "336")
+
+    cursor.fetchall.return_value = [
+        (unchanged.eli, 0, unchanged.sr, unchanged.text),
+        (changed.eli, 0, changed.sr, "Art. 335a\n1 Old wording."),
+        (vanished_eli, 0, unchanged.sr, "Art. 336\n1 Repealed."),
+    ]
+
+    upsert_chunks(conn, [unchanged, changed, new_chunk])
+
+    calls = cursor.execute.call_args_list
+    select_idx = next(
+        i for i, call in enumerate(calls) if call.args[0].strip().startswith("SELECT")
+    )
+    mutation_idxs = [i for i in range(len(calls)) if i != select_idx]
+    # the existing-state lookup happens before any mutation, and every mutation
+    # (across both acts) lands in the same transaction as a single commit
+    assert mutation_idxs and select_idx < min(mutation_idxs)
+
+    kinds = {calls[i].args[0].strip().split()[0] for i in mutation_idxs}
+    assert kinds == {"DELETE", "UPDATE", "INSERT"}
+    conn.commit.assert_called_once()
+
+    select_call = calls[select_idx]
+    assert set(select_call.args[1][0]) == {"220", "221"}
 
 

@@ -6,15 +6,15 @@ from urllib.parse import urlsplit
 
 import httpx
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from retrieval.citations import extract_citations
 from retrieval.config import Settings
 from retrieval.db import connect, dense_search, fts_search
 from retrieval.embeddings import embed_query
-from retrieval.generation import build_messages, stream_chat
+from retrieval.generation import REFUSAL_SENTENCE, build_messages, stream_chat
 from retrieval.ingest import (
     IngestState,
     embedded_count,
@@ -30,8 +30,16 @@ from retrieval.language import (
     fts_language,
 )
 from retrieval.models import ChatRequest, SearchRequest, SearchResponse
+from retrieval.readiness import check_corpus, check_ollama, check_postgres
 from retrieval.rerank import Reranker
 from retrieval.search import SearchDeps, run_search
+from retrieval.security import RateLimiter, verify_api_key
+
+# Auth (when API_KEY is set) applies to every endpoint except these liveness/readiness
+# probes. Rate limiting (when RATE_LIMIT_PER_MINUTE > 0) applies only to the POST
+# endpoints below — GET status/progress/health/ready are never throttled.
+_OPEN_PATHS = {"/health", "/ready"}
+_RATE_LIMITED_PATHS = {"/search", "/chat", "/ingest"}
 
 
 def _db_host(database_url: str) -> str:
@@ -50,7 +58,7 @@ def _connect_deps(app: FastAPI) -> None:
     if app.state.client is None:
         app.state.client = httpx.Client(timeout=60.0)
     client = app.state.client
-    reranker = Reranker(settings.reranker_model)
+    reranker = Reranker(settings.reranker_model, settings.reranker_revision)
     app.state.conn = conn
     app.state.deps = SearchDeps(
         embed=lambda text: embed_query(
@@ -89,6 +97,35 @@ def create_app() -> FastAPI:
         _close_client(app)
 
     app = FastAPI(title="swiss-legal-rag retrieval", lifespan=lifespan)
+    app.state.deps = None
+    app.state.conn = None
+    app.state.client = None
+    app.state.ingest = IngestState()
+    app.state.rate_limiter = None  # lazily built from settings on first request
+
+    @app.middleware("http")
+    async def enforce_security(request: Request, call_next):  # type: ignore[no-untyped-def]
+        settings = app.state.settings
+        if request.url.path not in _OPEN_PATHS and settings.api_key is not None:
+            if not verify_api_key(request.headers.get("X-API-Key"), settings.api_key):
+                return JSONResponse(
+                    status_code=401, content={"detail": "invalid or missing API key"}
+                )
+        if request.method == "POST" and request.url.path in _RATE_LIMITED_PATHS:
+            if app.state.rate_limiter is None:
+                app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+            client_key = request.client.host if request.client else "unknown"
+            if not app.state.rate_limiter.allow(client_key):
+                return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+        return await call_next(request)
+
+    # Registered after enforce_security so CORS ends up OUTERMOST: Starlette's
+    # add_middleware() prepends to the stack, so whichever middleware is added
+    # last wraps everything added before it. With CORS outermost, its own
+    # preflight handling answers cross-origin OPTIONS requests (which never
+    # carry X-API-Key) before enforce_security gets a chance to 401 them, and
+    # it still stamps Access-Control-Allow-Origin onto 401/429 responses that
+    # enforce_security returns, since those responses pass back out through it.
     # Desktop webview origins: Vite dev server and Tauri's production origin.
     app.add_middleware(
         CORSMiddleware,
@@ -100,10 +137,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.state.deps = None
-    app.state.conn = None
-    app.state.client = None
-    app.state.ingest = IngestState()
 
     @app.post("/search")
     def search(request: SearchRequest) -> SearchResponse:
@@ -125,8 +158,9 @@ def create_app() -> FastAPI:
 
     _SOURCE_FIELDS = {"sr", "article", "heading", "eli", "lang", "score"}
     # Exact wording is part of the citation contract: the M6 evals refusal metric
-    # counts zero resolved citations, so this sentence must never carry a [SR ...] tag.
-    _REFUSAL_TEXT = "The current corpus contains no sources sufficient to answer this question."
+    # requires this sentence verbatim, so it must never carry a [SR ...] tag.
+    # REFUSAL_SENTENCE is the single source of truth (retrieval.generation).
+    _REFUSAL_TEXT = REFUSAL_SENTENCE
 
     @app.post("/chat")
     def chat(request: ChatRequest) -> StreamingResponse:
@@ -204,6 +238,25 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        # Real dependency probes for orchestration/monitoring; /health above
+        # stays a static 200 for liveness. Each check reports False rather
+        # than raising, so one down dependency 503s instead of 500ing.
+        if app.state.client is None:
+            app.state.client = httpx.Client(timeout=60.0)
+        settings = app.state.settings
+        checks = {
+            "postgres": check_postgres(settings),
+            "ollama": check_ollama(app.state.client, settings),
+            "corpus": check_corpus(settings),
+        }
+        ready_status = all(checks.values())
+        return JSONResponse(
+            status_code=200 if ready_status else 503,
+            content={"ready": ready_status, "checks": checks},
+        )
 
     @app.get("/ingest/status")
     def get_ingest_status() -> dict:

@@ -83,16 +83,61 @@ def test_keyword_recall_none_when_no_expected_keywords():
     assert keyword_recall("irrelevant answer text", []) is None
 
 
-def test_refusal_ok_true_when_must_refuse_and_nothing_resolved():
-    assert refusal_ok([{"resolved": False}], True) is True
+def test_refusal_ok_true_when_nothing_resolved_and_canonical_sentence_present():
+    answer = "The current corpus contains no sources sufficient to answer this question."
+    assert refusal_ok([{"resolved": False}], True, answer) is True
 
 
 def test_refusal_ok_false_when_must_refuse_but_something_resolved():
-    assert refusal_ok([{"resolved": True}, {"resolved": False}], True) is False
+    answer = "The current corpus contains no sources sufficient to answer this question."
+    assert refusal_ok([{"resolved": True}, {"resolved": False}], True, answer) is False
+
+
+def test_refusal_ok_false_when_nothing_resolved_but_canonical_sentence_missing():
+    assert refusal_ok([{"resolved": False}], True, "Ich kann das nicht beantworten") is False
+
+
+def test_refusal_ok_is_case_insensitive_on_canonical_sentence():
+    answer = "THE CURRENT CORPUS CONTAINS NO SOURCES SUFFICIENT TO ANSWER THIS QUESTION."
+    assert refusal_ok([{"resolved": False}], True, answer) is True
 
 
 def test_refusal_ok_none_when_not_must_refuse():
-    assert refusal_ok([{"resolved": True}], False) is None
+    assert refusal_ok([{"resolved": True}], False, "irrelevant") is None
+
+
+def test_refusal_ok_false_when_extra_trailing_words_added():
+    # Upstream contract: the whole answer must equal the canonical sentence,
+    # not merely contain it -- added words must fail even though the sentence
+    # is present verbatim as a substring.
+    answer = (
+        "The current corpus contains no sources sufficient to answer this "
+        "question. Please consult a lawyer."
+    )
+    assert refusal_ok([{"resolved": False}], True, answer) is False
+
+
+def test_refusal_ok_false_when_extra_leading_words_added():
+    answer = (
+        "I'm sorry. The current corpus contains no sources sufficient to "
+        "answer this question."
+    )
+    assert refusal_ok([{"resolved": False}], True, answer) is False
+
+
+def test_refusal_ok_true_with_whitespace_run_collapsed():
+    answer = "The current   corpus contains no sources\nsufficient to answer this question."
+    assert refusal_ok([{"resolved": False}], True, answer) is True
+
+
+def test_refusal_ok_true_with_surrounding_whitespace_stripped():
+    answer = "  \n The current corpus contains no sources sufficient to answer this question. \n "
+    assert refusal_ok([{"resolved": False}], True, answer) is True
+
+
+def test_refusal_ok_true_with_case_and_whitespace_variant_combined():
+    answer = "  THE current   CORPUS contains no sources sufficient to answer this question.  "
+    assert refusal_ok([{"resolved": False}], True, answer) is True
 
 
 def test_summarize_computes_means_over_non_null_rows():

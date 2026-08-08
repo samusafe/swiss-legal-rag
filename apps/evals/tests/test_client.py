@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from evals.client import chat, search
+from evals.client import auth_headers, chat, search
 
 
 def test_search_posts_query_and_returns_results_list():
@@ -136,3 +136,63 @@ def test_chat_raises_runtime_error_on_non_200():
     with httpx.Client(transport=transport) as http_client:
         with pytest.raises(RuntimeError):
             chat(http_client, "http://test", "frage", "de", 5)
+
+
+def test_auth_headers_empty_when_api_key_is_none():
+    assert auth_headers(None) == {}
+
+
+def test_auth_headers_empty_when_api_key_is_empty_string():
+    assert auth_headers("") == {}
+
+
+def test_auth_headers_carries_x_api_key_when_set():
+    assert auth_headers("secret-key") == {"X-API-Key": "secret-key"}
+
+
+def test_search_sends_x_api_key_header_when_provided():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("x-api-key") == "secret-key"
+        return httpx.Response(
+            200, json={"results": [], "took_ms": {"embed": 1}}
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        search(http_client, "http://test", "frage", "de", 5, api_key="secret-key")
+
+
+def test_search_omits_x_api_key_header_when_not_provided():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "x-api-key" not in request.headers
+        return httpx.Response(
+            200, json={"results": [], "took_ms": {"embed": 1}}
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        search(http_client, "http://test", "frage", "de", 5)
+
+
+def test_chat_sends_x_api_key_header_when_provided():
+    body = _sse_body([("sources", {"sources": []}), ("done", {"citations": []})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("x-api-key") == "secret-key"
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        chat(http_client, "http://test", "frage", "de", 5, api_key="secret-key")
+
+
+def test_chat_omits_x_api_key_header_when_not_provided():
+    body = _sse_body([("sources", {"sources": []}), ("done", {"citations": []})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "x-api-key" not in request.headers
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        chat(http_client, "http://test", "frage", "de", 5)

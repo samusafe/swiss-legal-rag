@@ -1,18 +1,75 @@
-import { useState } from "react";
+import { motion } from "framer-motion";
+import { useCallback, useEffect, useState } from "react";
+import { ArticlePreviewModal, primeArticlePreviewCache } from "./components/ArticlePreview";
 import { Composer } from "./components/Composer";
-import { CorpusModal } from "./components/CorpusModal";
 import { Header } from "./components/Header";
 import { MessageList } from "./components/MessageList";
+import { SettingsModal } from "./components/SettingsModal";
+import { Sidebar } from "./components/Sidebar";
 import { SourcesPanel } from "./components/SourcesPanel";
+import { t, toSearchLang, useLang } from "./i18n";
+import type { SearchResult } from "./lib/api";
 import { useChat } from "./hooks/useChat";
+import { useConversations } from "./hooks/useConversations";
 import { useHealth } from "./hooks/useHealth";
 import { useIngest } from "./hooks/useIngest";
+import { usePrefersReducedMotion } from "./hooks/usePrefersReducedMotion";
+import { useShortcuts } from "./hooks/useShortcuts";
+import { useTheme } from "./hooks/useTheme";
+import { prefs } from "./lib/prefs";
+
+type Panels = { left: boolean; right: boolean };
+const DEFAULT_PANELS: Panels = { left: true, right: true };
 
 export default function App() {
   const online = useHealth();
-  const { messages, sources, thinking, streaming, banner, send, stop } = useChat();
+  const { lang } = useLang();
+  const { theme, setTheme } = useTheme();
+  const {
+    messages,
+    sources,
+    thinking,
+    streaming,
+    banner,
+    conversationId,
+    send,
+    stop,
+    reset,
+    loadConversation,
+  } = useChat();
   const ingest = useIngest();
-  const [corpusOpen, setCorpusOpen] = useState(false);
+  const conversations = useConversations();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panels, setPanels] = useState<Panels>(() => prefs.get("panels", DEFAULT_PANELS));
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // Surfaces failures from conversation mutations that bypass useChat's own
+  // banner (rename/delete, and the sidebar-list refresh triggered after
+  // send() — a mutation useChat makes outside useConversations' own
+  // tracking) — kept separate from useChat's banner so a hiccup here never
+  // overwrites a legitimate streaming error still on screen.
+  const [convError, setConvError] = useState<string | null>(null);
+  const handleConvError = useCallback((error: unknown) => {
+    setConvError(error instanceof Error ? error.message : String(error));
+  }, []);
+  const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    prefs.set("panels", panels);
+  }, [panels]);
+
+  // useChat owns conversation persistence directly (see its module doc), so
+  // the sidebar's separate conversation list only learns about a new/updated
+  // row by re-reading it — and only learns which row is active by mirroring
+  // useChat's own id.
+  useEffect(() => {
+    setActiveId(conversationId);
+  }, [conversationId]);
+
+  const toggleLeft = useCallback(() => setPanels((prev) => ({ ...prev, left: !prev.left })), []);
+  const toggleRight = useCallback(
+    () => setPanels((prev) => ({ ...prev, right: !prev.right })),
+    [],
+  );
 
   const ingestPercent =
     ingest.progress !== null && ingest.progress.total > 0
@@ -30,27 +87,90 @@ export default function App() {
     selectedIndex !== null
       ? messages.slice(0, selectedIndex + 1).filter((m) => m.role === "assistant").length
       : 0;
-  const subtitle = selectedIndex !== null ? `answer ${answerOrdinal}` : "latest answer";
+  const subtitle =
+    selectedIndex !== null ? t("sources.answerN", { n: answerOrdinal }) : t("sources.latest");
+
+  const handleNew = useCallback(() => {
+    setSelectedIndex(null);
+    reset();
+  }, [reset]);
+
+  const handleResume = useCallback(
+    (id: string) => {
+      setSelectedIndex(null);
+      void loadConversation(id);
+    },
+    [loadConversation],
+  );
+
+  const [previewTarget, setPreviewTarget] = useState<{
+    srNumber: string;
+    article: string;
+  } | null>(null);
+
+  const handleSearchSelect = useCallback(
+    (result: SearchResult) => {
+      // The sidebar already has the exact match in hand — prime the preview's
+      // cache so opening it is instant instead of re-fetching what we just fetched.
+      primeArticlePreviewCache(toSearchLang(lang), result);
+      setPreviewTarget({ srNumber: result.sr, article: result.article });
+    },
+    [lang],
+  );
+
+  // Bumped on every Ctrl+K so Sidebar can (re-)focus the search input even
+  // when the left panel is already expanded (plain `left: true` is then a
+  // no-op state update and triggers no re-render for Sidebar to react to).
+  const [searchFocusSignal, setSearchFocusSignal] = useState(0);
+
+  useShortcuts({
+    "ctrl+b": toggleLeft,
+    "ctrl+n": handleNew,
+    "ctrl+k": () => {
+      setPanels((prev) => ({ ...prev, left: true }));
+      setSearchFocusSignal((n) => n + 1);
+    },
+    "ctrl+j": toggleRight,
+    "ctrl+,": () => setSettingsOpen(true),
+  });
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <Header
         online={online}
         ingestPercent={ingestPercent}
-        onOpenCorpus={() => setCorpusOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        theme={theme}
+        setTheme={setTheme}
       />
-      {banner !== null && (
+      {(banner ?? convError ?? conversations.error) !== null && (
         <div role="alert" className="bg-danger-50 px-4 py-2 text-sm text-danger">
-          {banner}
+          {banner ?? convError ?? conversations.error}
         </div>
       )}
       {corpusEmpty && !ingest.running && (
         <div className="bg-warning-50 px-4 py-2 text-sm text-warning-700">
-          Corpus not embedded — open the Corpus panel.
+          {t("banner.corpusEmpty")}
         </div>
       )}
-      <main className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[1fr_auto] lg:grid-cols-[1fr_20rem] lg:grid-rows-1">
-        <section className="flex min-h-0 flex-col">
+      <div className="grid min-h-0 flex-1 grid-cols-[auto_1fr_auto]">
+        <Sidebar
+          collapsed={!panels.left}
+          onToggle={toggleLeft}
+          conversations={conversations.conversations}
+          activeId={activeId}
+          onNew={handleNew}
+          onResume={handleResume}
+          onRename={(id, title) => {
+            conversations.rename(id, title).catch(handleConvError);
+          }}
+          onDelete={(id) => {
+            conversations.remove(id).catch(handleConvError);
+          }}
+          onSearchSelect={handleSearchSelect}
+          searchFocusSignal={searchFocusSignal}
+        />
+        <main className="flex min-h-0 flex-col">
           <MessageList
             messages={messages}
             streaming={streaming}
@@ -65,27 +185,64 @@ export default function App() {
             streaming={streaming}
             onSend={(question) => {
               setSelectedIndex(null);
-              void send(question);
+              setConvError(null);
+              // send() persists via lib/db directly (see useChat), bypassing
+              // useConversations' own refresh — re-read the list afterward so
+              // the sidebar shows the new/updated conversation. useChat folds
+              // its own failures (including a failed partial-answer save)
+              // into its own banner and never rejects, but this `.catch` is
+              // kept as a backstop against an unhandled rejection either way.
+              void send(question)
+                .then(() => conversations.refresh().catch(handleConvError))
+                .catch(handleConvError);
             }}
             onStop={stop}
           />
-        </section>
-        <SourcesPanel
-          sources={panelSources}
-          streaming={streaming && selectedIndex === null}
-          citations={panelCitations}
-          subtitle={subtitle}
-        />
-      </main>
-      <CorpusModal
-        isOpen={corpusOpen}
-        onClose={() => setCorpusOpen(false)}
-        status={ingest.status}
-        progress={ingest.progress}
-        running={ingest.running}
-        error={ingest.error}
-        onStart={() => void ingest.start()}
+        </main>
+        <div className="relative flex min-h-0">
+          <motion.div
+            initial={false}
+            animate={{ width: panels.right ? "20rem" : "0rem" }}
+            transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            {panels.right && (
+              <SourcesPanel
+                sources={panelSources}
+                streaming={streaming && selectedIndex === null}
+                citations={panelCitations}
+                subtitle={subtitle}
+                onCollapse={toggleRight}
+              />
+            )}
+          </motion.div>
+          {!panels.right && (
+            <button
+              type="button"
+              aria-label={t("sources.expand")}
+              onClick={toggleRight}
+              className="flex w-6 items-center justify-center border-l border-divider text-foreground-400 hover:text-foreground"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-4 w-4"
+                aria-hidden="true"
+              >
+                <path d="M15 6l-6 6 6 6" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        ingest={ingest}
       />
+      <ArticlePreviewModal target={previewTarget} onClose={() => setPreviewTarget(null)} />
     </div>
   );
 }

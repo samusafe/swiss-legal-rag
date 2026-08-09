@@ -24,6 +24,11 @@ updates:
       # the app); done deliberately, not via automated PRs.
       - dependency-name: "@heroui/*"
         update-types: ["version-update:semver-major"]
+      # jsdom >=29 ships ESM-only transitive deps (html-encoding-sniffer 6+)
+      # that break vitest 4 workers (ERR_REQUIRE_ESM); verified locally on
+      # 29.1.1 and 30.0.1. Revisit when vitest supports it.
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -106,6 +106,28 @@ def test_progress_streams_live_phase_while_running(monkeypatch) -> None:
     assert frames[0] == ("progress", '{"phase": "fetch", "done": 1, "total": 3}')
 
 
+def test_post_ingest_stop_terminates_and_returns_200(monkeypatch) -> None:
+    stopped: list[object] = []
+    monkeypatch.setattr(
+        "retrieval.app.stop_ingest", lambda state: stopped.append(state) or True
+    )
+    client, _ = make_client()
+    with client:
+        response = client.post("/ingest/stop")
+    assert response.status_code == 200
+    assert response.json() == {"status": "stopping"}
+    assert len(stopped) == 1
+
+
+def test_post_ingest_stop_conflicts_when_no_run_active(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.stop_ingest", lambda state: False)
+    client, _ = make_client()
+    with client:
+        response = client.post("/ingest/stop")
+    assert response.status_code == 409
+    assert "no ingest run is active" in response.json()["detail"]
+
+
 def test_progress_ends_with_error_event_after_failed_run(monkeypatch) -> None:
     monkeypatch.setattr("retrieval.app.phase_progress", lambda phase, url: (0, 3))
     client, app = make_client()

@@ -22,6 +22,7 @@ from retrieval.ingest import (
     ingestion_python,
     phase_progress,
     start_ingest,
+    stop_ingest,
 )
 from retrieval.language import (
     answer_language,
@@ -39,7 +40,7 @@ from retrieval.security import RateLimiter, verify_api_key
 # probes. Rate limiting (when RATE_LIMIT_PER_MINUTE > 0) applies only to the POST
 # endpoints below — GET status/progress/health/ready are never throttled.
 _OPEN_PATHS = {"/health", "/ready"}
-_RATE_LIMITED_PATHS = {"/search", "/chat", "/ingest"}
+_RATE_LIMITED_PATHS = {"/search", "/chat", "/ingest", "/ingest/stop"}
 
 
 def _db_host(database_url: str) -> str:
@@ -268,6 +269,12 @@ def create_app() -> FastAPI:
         if not start_ingest(app.state.ingest, python):
             raise HTTPException(status_code=409, detail="an ingest run is already active")
         return {"status": "started"}
+
+    @app.post("/ingest/stop")
+    def post_ingest_stop() -> dict[str, str]:
+        if not stop_ingest(app.state.ingest):
+            raise HTTPException(status_code=409, detail="no ingest run is active")
+        return {"status": "stopping"}
 
     @app.get("/ingest/progress")
     def ingest_progress() -> StreamingResponse:

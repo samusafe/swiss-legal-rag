@@ -222,7 +222,7 @@ answer and forwarded as `thinking` events (never mixed into citation extraction,
 `token` deltas); a stream that never emits a `</think>` marker is delivered as a single `token`
 flush at the end.
 
-### `POST /ingest`, `GET /ingest/status`, `GET /ingest/progress`
+### `POST /ingest`, `GET /ingest/status`, `GET /ingest/progress`, `POST /ingest/stop`
 
 Runs the ingestion pipeline (`resolve → fetch → parse → embed`) as a background
 subprocess of `apps/ingestion`'s venv, one run at a time.
@@ -234,6 +234,9 @@ subprocess of `apps/ingestion`'s venv, one run at a time.
 - `GET /ingest/progress` → SSE (`progress` ~1/s with `{"phase", "done", "total"}`,
   then terminal `done` or `error`). Connecting while idle returns a snapshot and
   ends immediately.
+- `POST /ingest/stop` → `200 {"status": "stopping"}`, or `409` when no run is active.
+  Terminates the current phase's subprocess; the run then ends with an `error`
+  event on `/ingest/progress` (progress already made in earlier phases is kept).
 
 Set `INGESTION_PYTHON` in `.env` if the ingestion venv lives outside the default
 `apps/ingestion/.venv` layout.

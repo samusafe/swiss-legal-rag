@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
+  openPath: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { openExternal } from "./open";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openCorpusYaml, openExternal } from "./open";
 
 const VALID_URL = "https://www.fedlex.admin.ch/eli/cc/24/233_245_233/en";
 
@@ -69,5 +70,23 @@ describe("openExternal", () => {
 
     expect(openUrl).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("openCorpusYaml", () => {
+  it("opens the repo-root corpus.yaml via the opener plugin", () => {
+    openCorpusYaml();
+
+    expect(openPath).toHaveBeenCalledWith("../../corpus.yaml");
+  });
+
+  it("logs, rather than throws, when the opener plugin rejects", async () => {
+    vi.mocked(openPath).mockRejectedValueOnce(new Error("no default app"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    openCorpusYaml();
+    await Promise.resolve(); // flush the rejection's .catch()
+
+    expect(error).toHaveBeenCalledWith("failed to open corpus.yaml", expect.any(Error));
   });
 });

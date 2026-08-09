@@ -1,8 +1,14 @@
+import { motion } from "framer-motion";
 import { useState, type KeyboardEvent } from "react";
 import type { ChatMessage } from "../hooks/useChat";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { SHOW_THINKING } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { CitationChip } from "./CitationChip";
+
+// Message entry: fade + 4px slide, 120ms — instant when the OS prefers reduced motion.
+const ENTRY_OFFSET_PX = 4;
+const ENTRY_DURATION_S = 0.12;
 
 function ThinkingDots() {
   return (
@@ -98,18 +104,26 @@ export function MessageList({
   // can exercise both states without stubbing import.meta.env.
   showThinking?: boolean;
 }) {
+  const reducedMotion = usePrefersReducedMotion();
+  const entryMotion = {
+    initial: { opacity: 0, y: reducedMotion ? 0 : ENTRY_OFFSET_PX },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: reducedMotion ? 0 : ENTRY_DURATION_S },
+  };
+
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
       {/* Transcript is append-only, so index keys are stable. */}
       {messages.map((message, i) => {
         if (message.role === "user") {
           return (
-            <div
+            <motion.div
               key={i}
-              className="max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-primary px-4 py-2 text-primary-foreground"
+              {...entryMotion}
+              className="max-w-[80%] self-end whitespace-pre-wrap rounded-sm bg-foreground px-4 py-2 text-background"
             >
               {message.text}
-            </div>
+            </motion.div>
           );
         }
 
@@ -135,10 +149,11 @@ export function MessageList({
             };
 
         return (
-          <div
+          <motion.div
             key={i}
+            {...entryMotion}
             {...interactiveProps}
-            className={`max-w-[80%] cursor-pointer self-start whitespace-pre-wrap rounded-2xl bg-content2 px-4 py-2 ${
+            className={`max-w-[80%] cursor-pointer self-start whitespace-pre-wrap rounded-sm border border-divider border-l-3 border-l-primary bg-content1 px-4 py-2 ${
               selectedIndex === i ? "ring-2 ring-primary" : ""
             }`}
           >
@@ -163,7 +178,7 @@ export function MessageList({
             {message.stopped === true && (
               <p className="mt-1 text-xs text-foreground-400">stopped</p>
             )}
-          </div>
+          </motion.div>
         );
       })}
     </div>

@@ -4,6 +4,7 @@ import subprocess
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -26,6 +27,14 @@ class IngestState:
     phase: str | None = None
     error: str | None = None
     thread: threading.Thread | None = None
+    # The current phase's subprocess, set only while it's actually running
+    # (see _run_via_popen) — stop_ingest() terminates it, if present.
+    process: subprocess.Popen[str] | None = None
+    # Set by stop_ingest(); _run_pipeline checks this before spawning each
+    # phase so a stop requested in the gap between phases (previous Popen
+    # already exited, next not yet spawned) still aborts the run instead of
+    # letting the next phase start unopposed.
+    stop_requested: bool = False
 
     @property
     def running(self) -> bool:
@@ -104,6 +113,9 @@ def _run_pipeline(state: IngestState, python: Path, repo_root: Path, run: RunFn)
     try:
         for phase in PHASES:
             with state.lock:
+                if state.stop_requested:
+                    state.error = "ingest stopped by request"
+                    return
                 state.phase = phase
             result = run(
                 [str(python), "-m", "ingestion.cli", phase],
@@ -112,12 +124,19 @@ def _run_pipeline(state: IngestState, python: Path, repo_root: Path, run: RunFn)
                 text=True,
             )
             if result.returncode != 0:
-                # some steps report failures on stdout, so fall back to it for the tail
-                tail = (result.stderr or result.stdout or "")[-STDERR_TAIL_CHARS:]
                 with state.lock:
-                    state.error = (
-                        f"`ingest {phase}` failed (exit {result.returncode}): {tail}"
-                    )
+                    if state.stop_requested:
+                        # process.terminate() (see stop_ingest) makes the
+                        # subprocess exit nonzero — that's an expected
+                        # consequence of the user's own request, not a
+                        # failure, so it must not read like the branch below.
+                        state.error = "ingest stopped by request"
+                    else:
+                        # some steps report failures on stdout, so fall back to it for the tail
+                        tail = (result.stderr or result.stdout or "")[-STDERR_TAIL_CHARS:]
+                        state.error = (
+                            f"`ingest {phase}` failed (exit {result.returncode}): {tail}"
+                        )
                 return
     except Exception as error:  # interpreter missing, bad path, undecodable output
         with state.lock:
@@ -127,19 +146,62 @@ def _run_pipeline(state: IngestState, python: Path, repo_root: Path, run: RunFn)
             state.phase = None
 
 
+def _run_via_popen(
+    state: IngestState, cmd: list[str], cwd: Path, capture_output: bool, text: bool
+) -> subprocess.CompletedProcess[str]:
+    # Default RunFn: uses Popen (not subprocess.run) so the process handle can
+    # be stashed on `state` for stop_ingest() to terminate mid-phase.
+    process = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text
+    )
+    with state.lock:
+        state.process = process
+    try:
+        stdout, stderr = process.communicate()
+    finally:
+        with state.lock:
+            state.process = None
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
 def start_ingest(
     state: IngestState,
     python: Path,
     repo_root: Path = REPO_ROOT,
-    run: RunFn = subprocess.run,
+    run: RunFn | None = None,
 ) -> bool:
     with state.lock:
         if state.thread is not None and state.thread.is_alive():
             return False
         state.error = None
+        state.stop_requested = False
+        actual_run = run if run is not None else partial(_run_via_popen, state)
         thread = threading.Thread(
-            target=_run_pipeline, args=(state, python, repo_root, run), daemon=True
+            target=_run_pipeline, args=(state, python, repo_root, actual_run), daemon=True
         )
         state.thread = thread
         thread.start()
+    return True
+
+
+def stop_ingest(state: IngestState) -> bool:
+    """Stops the active run, if any: terminates the current phase's live
+    subprocess when there is one, and/or latches stop_requested so
+    _run_pipeline aborts before spawning the next phase — covering the gap
+    between phases where no subprocess is live yet to terminate.
+
+    Returns False (no-op) when no run is active — the caller (the /ingest/stop
+    endpoint) maps that to a 409. Either path ends the run with `state.error`
+    set (visible via /ingest/status becoming non-running, and as a terminal
+    `error` event on /ingest/progress).
+    """
+    with state.lock:
+        running = state.running
+        process = state.process
+        if running:
+            state.stop_requested = True
+    if not running:
+        return False
+    if process is not None:
+        process.terminate()
     return True

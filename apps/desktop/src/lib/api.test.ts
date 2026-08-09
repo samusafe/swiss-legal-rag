@@ -105,6 +105,65 @@ describe("postChat", () => {
   });
 });
 
+import { search } from "./api";
+
+describe("search", () => {
+  it("posts q/k/lang to /search and maps snake_case results to camelCase", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              sr: "220",
+              article: "335c",
+              heading: "Kündigung",
+              context: "Die Kündigungsfrist…",
+              text: "full text",
+              eli: "https://example.test/e",
+              act_name: "Obligationenrecht",
+              score: 6.9,
+            },
+          ],
+          took_ms: { embed: 1, search: 2, rerank: 3 },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await search("Kündigungsfrist", 8, "de");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/search",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ q: "Kündigungsfrist", k: 8, lang: "de" }),
+      }),
+    );
+    expect(results).toEqual([
+      {
+        sr: "220",
+        article: "335c",
+        heading: "Kündigung",
+        context: "Die Kündigungsfrist…",
+        text: "full text",
+        eli: "https://example.test/e",
+        actName: "Obligationenrecht",
+        score: 6.9,
+      },
+    ]);
+  });
+
+  it("throws the backend detail on failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "boom" }), { status: 422 })),
+    );
+
+    await expect(search("q", 8, "de")).rejects.toThrow("boom");
+  });
+});
+
 describe("getHealth", () => {
   it("returns true when /health responds ok", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('{"status": "ok"}')));
@@ -123,7 +182,7 @@ describe("getHealth", () => {
 });
 
 import type { IngestEvent } from "./api";
-import { getIngestStatus, postIngest, streamIngestProgress } from "./api";
+import { getIngestStatus, postIngest, postIngestStop, streamIngestProgress } from "./api";
 
 async function collectIngest(): Promise<IngestEvent[]> {
   const events: IngestEvent[] = [];
@@ -185,6 +244,30 @@ describe("postIngest", () => {
   });
 });
 
+describe("postIngestStop", () => {
+  it("POSTs to /ingest/stop and resolves on 200", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{"status": "stopping"}', { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await postIngestStop();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/ingest/stop",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("throws the 409 detail when no run is active", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response('{"detail": "no ingest run is active"}', { status: 409 }),
+      ),
+    );
+    await expect(postIngestStop()).rejects.toThrow("no ingest run is active");
+  });
+});
+
 describe("X-API-Key header (VITE_API_KEY)", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -223,7 +306,7 @@ describe("X-API-Key header (VITE_API_KEY)", () => {
     );
   });
 
-  it("is sent on getHealth, getIngestStatus, postIngest, and streamIngestProgress when set", async () => {
+  it("is sent on getHealth, getIngestStatus, postIngest, postIngestStop, and streamIngestProgress when set", async () => {
     vi.stubEnv("VITE_API_KEY", "secret-key");
     const api = await import("./api");
     // A fresh Response per call: bodies can only be read/streamed once.
@@ -240,6 +323,7 @@ describe("X-API-Key header (VITE_API_KEY)", () => {
     await api.getHealth();
     await api.getIngestStatus();
     await api.postIngest();
+    await api.postIngestStop();
     for await (const _event of api.streamIngestProgress(new AbortController().signal)) {
       // drain
     }

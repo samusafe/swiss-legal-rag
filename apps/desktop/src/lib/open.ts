@@ -1,4 +1,4 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 
 // Citation `eli` values originate from the backend, but this is defense-in-depth:
 // only ever open links to the official Fedlex site.
@@ -18,4 +18,15 @@ export function openExternal(url: string): void {
   } else {
     window.open(url, "_blank", "noopener,noreferrer");
   }
+}
+
+/** Opens the repo's corpus.yaml with the system default app (a text/YAML
+ * editor). Dev convenience for repo contributors: `tauri dev` runs from
+ * apps/desktop/src-tauri, so this relative path resolves to the repo root
+ * corpus.yaml. Not meaningful in a packaged build (corpus.yaml isn't bundled
+ * with the app), where it silently fails and is logged. */
+export function openCorpusYaml(): void {
+  openPath("../../corpus.yaml").catch((error: unknown) =>
+    console.error("failed to open corpus.yaml", error),
+  );
 }

@@ -1,5 +1,21 @@
 import { useState } from "react";
 import { Button, Textarea } from "@heroui/react";
+import { t } from "../i18n";
+
+function ArrowIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className="h-3.5 w-3.5"
+      aria-hidden="true"
+    >
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
 
 export function Composer({
   disabled,
@@ -24,32 +40,34 @@ export function Composer({
   }
 
   return (
-    <div className="flex items-end gap-2 border-t border-divider p-4">
-      <Textarea
-        value={draft}
-        onValueChange={setDraft}
-        minRows={1}
-        maxRows={6}
-        placeholder={
-          offline ? "Start the retrieval API to ask questions" : "Ask about Swiss federal law…"
-        }
-        isDisabled={disabled}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            submit();
-          }
-        }}
-      />
-      {streaming ? (
-        <Button color="danger" aria-label="Stop" onPress={onStop}>
-          {"■︎"} Stop
-        </Button>
-      ) : (
-        <Button color="primary" isDisabled={disabled || trimmed === ""} onPress={submit}>
-          Send
-        </Button>
-      )}
+    <div className="p-3">
+      <div className="flex items-end gap-2 rounded-sm border-2 border-foreground p-2">
+        <Textarea
+          value={draft}
+          onValueChange={setDraft}
+          minRows={1}
+          maxRows={6}
+          placeholder={offline ? t("composer.offline") : t("composer.placeholder")}
+          isDisabled={disabled}
+          classNames={{ inputWrapper: "border-none bg-transparent shadow-none px-1" }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        {streaming ? (
+          <Button color="danger" aria-label={t("composer.stop")} onPress={onStop}>
+            {"■︎"} {t("composer.stop")}
+          </Button>
+        ) : (
+          <Button color="primary" isDisabled={disabled || trimmed === ""} onPress={submit}>
+            Send
+            <ArrowIcon />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Button, Chip, Progress, Skeleton } from "@heroui/react";
+import { t } from "../i18n";
 import type { Citation, Source } from "../lib/api";
 import { openExternal } from "../lib/open";
 
@@ -27,18 +28,40 @@ export function SourcesPanel({
   streaming,
   citations,
   subtitle,
+  onCollapse,
 }: {
   sources: Source[];
   streaming: boolean;
   citations: Citation[];
   subtitle: string;
+  onCollapse?: () => void;
 }) {
   const deduped = dedupe(sources);
   const scores = deduped.map((source) => source.score);
   return (
-    <aside className="flex max-h-[30vh] flex-col gap-2 overflow-y-auto border-t border-divider p-4 lg:max-h-none lg:border-t-0 lg:border-l">
+    <aside className="flex h-full w-80 flex-col gap-2 overflow-y-auto border-l border-divider p-4">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold uppercase text-foreground-500">Sources</h2>
+        {onCollapse !== undefined && (
+          <Button
+            isIconOnly
+            size="sm"
+            variant="light"
+            aria-label={t("sources.collapse")}
+            onPress={onCollapse}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </Button>
+        )}
+        <h2 className="text-sm font-semibold uppercase text-foreground-500">{t("sources.title")}</h2>
         <span className="text-xs text-foreground-400">{subtitle}</span>
         {deduped.length > 0 && (
           <Chip size="sm" variant="flat" className="ml-auto">
@@ -52,7 +75,7 @@ export function SourcesPanel({
           <div
             key={i}
             data-testid="source-skeleton"
-            className="flex flex-1 flex-col justify-center gap-2 rounded-xl border border-divider p-3"
+            className="flex flex-1 flex-col justify-center gap-2 rounded-sm border border-divider bg-content1 p-3"
           >
             <Skeleton className="h-4 w-3/5 rounded" />
             <Skeleton className="h-3 w-4/5 rounded" />
@@ -89,7 +112,7 @@ export function SourcesPanel({
         return (
           <div
             key={`${source.sr}-${source.article}-${source.lang}`}
-            className="flex flex-col gap-1.5 rounded-xl border border-divider p-3"
+            className="flex flex-col gap-1.5 rounded-sm border border-divider bg-content1 p-3 text-foreground"
           >
             <div className="flex items-center gap-2">
               <span className="font-medium">
@@ -100,7 +123,7 @@ export function SourcesPanel({
               </Chip>
               {cited && (
                 <Chip size="sm" color="success" variant="flat">
-                  Cited
+                  {t("sources.cited")}
                 </Chip>
               )}
             </div>
@@ -114,6 +137,7 @@ export function SourcesPanel({
               <Progress
                 aria-label="Relevance"
                 size="sm"
+                color="primary"
                 value={relativePercent(source.score, scores)}
                 className="max-w-24"
               />

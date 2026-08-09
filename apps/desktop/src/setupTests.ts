@@ -8,3 +8,17 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// jsdom has no window.matchMedia; useTheme() now runs unconditionally inside
+// App, so every test that mounts App hits this. A no-op "never matches" stub
+// is enough — tests that need real change events (useTheme.test.tsx) install
+// their own richer mock, which shadows this one.
+function matchMediaStub(query: string): MediaQueryList {
+  return {
+    matches: false,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  } as unknown as MediaQueryList;
+}
+window.matchMedia ??= matchMediaStub;

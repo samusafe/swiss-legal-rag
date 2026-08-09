@@ -36,7 +36,7 @@ It is designed for a trusted local user, not for an internet-facing legal servic
 | Evidence-first answers | Gives the model only retrieved source blocks and refuses deterministically when no source is retrieved. |
 | Hybrid retrieval | Combines pgvector cosine search, PostgreSQL full-text search, reciprocal-rank fusion, and a cross-encoder reranker. |
 | Traceable output | Uses `[SR <number> Art. <article>]` citations resolved to official Fedlex ELI links. |
-| Local desktop workflow | Tauri + React client streams answers and can launch corpus ingestion with progress feedback. |
+| Local desktop workflow | Tauri + React client with a five-language UI, persistent conversation history, in-app corpus search with article preview, and streamed answers with progress feedback for corpus ingestion. |
 | Measurable quality | A 33-question DE/FR/IT seed dataset measures retrieval, citations, keywords, and refusal behavior. |
 
 ## Architecture

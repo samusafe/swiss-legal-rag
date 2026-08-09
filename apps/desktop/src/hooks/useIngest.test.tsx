@@ -6,13 +6,15 @@ import { useIngest } from "./useIngest";
 vi.mock("../lib/api", () => ({
   getIngestStatus: vi.fn(),
   postIngest: vi.fn(),
+  postIngestStop: vi.fn(),
   streamIngestProgress: vi.fn(),
 }));
 
-import { getIngestStatus, postIngest, streamIngestProgress } from "../lib/api";
+import { getIngestStatus, postIngest, postIngestStop, streamIngestProgress } from "../lib/api";
 
 const getStatusMock = vi.mocked(getIngestStatus);
 const postIngestMock = vi.mocked(postIngest);
+const postIngestStopMock = vi.mocked(postIngestStop);
 const streamMock = vi.mocked(streamIngestProgress);
 
 const IDLE: IngestStatus = {
@@ -31,9 +33,13 @@ describe("useIngest", () => {
   beforeEach(() => {
     getStatusMock.mockReset();
     postIngestMock.mockReset();
+    postIngestStopMock.mockReset();
     streamMock.mockReset();
     getStatusMock.mockResolvedValue(IDLE);
-    streamMock.mockReturnValue(events([]));
+    // A factory (not a shared instance): every call — including the
+    // automatic mount-time watch() — gets its own fresh generator, since
+    // async generators can't be replayed once drained.
+    streamMock.mockImplementation(() => events([]));
   });
 
   it("loads the status snapshot on mount", async () => {
@@ -42,9 +48,54 @@ describe("useIngest", () => {
     expect(result.current.running).toBe(false);
   });
 
+  it("subscribes to the progress stream immediately on mount, without waiting for the status fetch", async () => {
+    let resolveStatus: (() => void) | undefined;
+    let statusResolved = false;
+    getStatusMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = () => {
+            statusResolved = true;
+            resolve(IDLE);
+          };
+        }),
+    );
+    renderHook(() => useIngest());
+
+    // The SSE stream is already attached even though the status fetch is
+    // still pending — the two happen in parallel, not sequentially.
+    await waitFor(() => expect(streamMock).toHaveBeenCalled());
+    expect(statusResolved).toBe(false);
+
+    resolveStatus?.();
+  });
+
+  it("seeds the progress bar from the status snapshot while the first SSE event is still in flight", async () => {
+    getStatusMock.mockResolvedValue({
+      ...IDLE,
+      running: true,
+      phase: "embed",
+      chunksEmbedded: 6000,
+      chunksTotal: 12930,
+    });
+    // Never yields — simulates the SSE event not having arrived yet.
+    streamMock.mockImplementation(
+      () =>
+        new Promise<never>(() => {
+          // never resolves
+        }) as unknown as AsyncGenerator<IngestEvent>,
+    );
+
+    const { result } = renderHook(() => useIngest());
+
+    await waitFor(() =>
+      expect(result.current.progress).toEqual({ phase: "embed", done: 6000, total: 12930 }),
+    );
+  });
+
   it("start() posts, tracks progress, then re-syncs on done", async () => {
     postIngestMock.mockResolvedValue(undefined);
-    streamMock.mockReturnValue(
+    streamMock.mockImplementation(() =>
       events([
         { type: "progress", phase: "embed", done: 5, total: 10 },
         { type: "done", chunksEmbedded: 10 },
@@ -65,7 +116,7 @@ describe("useIngest", () => {
 
   it("surfaces a mid-run error event and stops progress", async () => {
     postIngestMock.mockResolvedValue(undefined);
-    streamMock.mockReturnValue(
+    streamMock.mockImplementation(() =>
       events([
         { type: "progress", phase: "fetch", done: 1, total: 3 },
         { type: "error", detail: "`ingest fetch` failed (exit 1): BOOM" },
@@ -94,9 +145,18 @@ describe("useIngest", () => {
     expect(result.current.error).toBe("an ingest run is already active");
   });
 
+  it("never surfaces the already-active error on a freshly (re)opened panel", async () => {
+    getStatusMock.mockResolvedValue({ ...IDLE, running: true, phase: "embed" });
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    expect(result.current.error).toBeNull();
+    expect(postIngestMock).not.toHaveBeenCalled();
+  });
+
   it("auto-watches when mounted while a run is active", async () => {
     getStatusMock.mockResolvedValue({ ...IDLE, running: true, phase: "embed" });
-    streamMock.mockReturnValue(
+    streamMock.mockImplementation(() =>
       events([{ type: "progress", phase: "embed", done: 2, total: 10 }]),
     );
     renderHook(() => useIngest());
@@ -119,5 +179,29 @@ describe("useIngest", () => {
     await act(async () => {});
 
     expect(getStatusMock).toHaveBeenCalledOnce(); // mount snapshot only — no post-abort refresh
+  });
+
+  it("stop() calls the stop endpoint", async () => {
+    postIngestStopMock.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(postIngestStopMock).toHaveBeenCalledOnce();
+  });
+
+  it("stop() surfaces the 409 detail when no run is active", async () => {
+    postIngestStopMock.mockRejectedValue(new Error("no ingest run is active"));
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(result.current.error).toBe("no ingest run is active");
   });
 });

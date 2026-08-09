@@ -1,26 +1,33 @@
 import { Button, Chip } from "@heroui/react";
 import type { Citation } from "../lib/api";
-import { openExternal } from "../lib/open";
+import { ArticlePreview } from "./ArticlePreview";
 
 export function CitationChip({ citation }: { citation: Citation }) {
   if (!citation.resolved || citation.eli === null) {
     return (
-      <Chip size="sm" variant="flat" className="mx-0.5 align-baseline">
+      <Chip
+        size="sm"
+        variant="flat"
+        className="mx-0.5 rounded-sm bg-foreground align-baseline text-background"
+      >
         {citation.raw}
       </Chip>
     );
   }
-  const eli = citation.eli;
   return (
-    <Button
-      size="sm"
-      variant="flat"
-      color="primary"
-      className="mx-0.5 h-6 min-w-0 px-2 align-baseline"
-      onPress={() => openExternal(eli)}
-      onClick={(event) => event.stopPropagation()}
-    >
-      {citation.raw}
-    </Button>
+    <ArticlePreview
+      srNumber={citation.sr}
+      article={citation.article}
+      trigger={
+        <Button
+          size="sm"
+          variant="flat"
+          className="mx-0.5 h-6 min-w-0 rounded-sm bg-foreground px-2 align-baseline text-background"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {citation.raw}
+        </Button>
+      }
+    />
   );
 }

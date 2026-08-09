@@ -131,6 +131,60 @@ export async function* postChat(
   yield* sseEvents(response, toChatEvent);
 }
 
+// The retrieval /search endpoint requires a concrete corpus language (its FTS
+// index is per-language); "en" is a UI-only language, so callers map it down
+// to one of these before calling search().
+export type SearchLang = "de" | "fr" | "it";
+
+export interface SearchResult {
+  sr: string;
+  article: string;
+  heading: string | null;
+  context: string | null;
+  text: string;
+  eli: string;
+  actName: string;
+  score: number;
+}
+
+export async function search(
+  q: string,
+  k: number,
+  lang: SearchLang,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const response = await fetch(`${API_BASE_URL}/search`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ q, k, lang }),
+    signal,
+  });
+  if (!response.ok) throw new Error(await errorDetail(response));
+  // Backend boundary cast: payload shape owned and tested by apps/retrieval.
+  const data = (await response.json()) as {
+    results: Array<{
+      sr: string;
+      article: string;
+      heading: string | null;
+      context: string | null;
+      text: string;
+      eli: string;
+      act_name: string;
+      score: number;
+    }>;
+  };
+  return data.results.map((r) => ({
+    sr: r.sr,
+    article: r.article,
+    heading: r.heading,
+    context: r.context,
+    text: r.text,
+    eli: r.eli,
+    actName: r.act_name,
+    score: r.score,
+  }));
+}
+
 export interface IngestStatus {
   running: boolean;
   phase: string | null;
@@ -166,6 +220,14 @@ export async function getIngestStatus(): Promise<IngestStatus> {
 
 export async function postIngest(): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/ingest`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!response.ok) throw new Error(await errorDetail(response));
+}
+
+export async function postIngestStop(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/ingest/stop`, {
     method: "POST",
     headers: authHeaders(),
   });

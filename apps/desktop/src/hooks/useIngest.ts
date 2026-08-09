@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getIngestStatus, postIngest, streamIngestProgress } from "../lib/api";
+import { getIngestStatus, postIngest, postIngestStop, streamIngestProgress } from "../lib/api";
 import type { IngestStatus } from "../lib/api";
 
 export interface IngestProgress {
@@ -69,16 +69,37 @@ export function useIngest() {
     }
   }, [watch]);
 
+  const stop = useCallback(async (): Promise<void> => {
+    try {
+      await postIngestStop();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  // Fetch the status snapshot AND attach to the progress stream in parallel
+  // on mount, rather than waiting for the snapshot to resolve before
+  // deciding whether to attach. A panel reopened mid-run then repaints its
+  // progress bar as soon as the first SSE event lands instead of after a
+  // full status round-trip first — the /ingest/progress endpoint itself
+  // is safe to hit unconditionally: idle, it just replies with one snapshot
+  // event followed by `done`.
   useEffect(() => {
     void refresh();
+    void watch();
     return () => abortRef.current?.abort();
-  }, [refresh]);
+  }, [refresh, watch]);
 
-  // Modal (re)opened while a run is active: reattach to the progress stream.
   const running = (status?.running ?? false) || progress !== null;
-  useEffect(() => {
-    if (status?.running === true && abortRef.current === null) void watch();
-  }, [status, watch]);
+  // Bridges the gap between mount and the first SSE progress event for a
+  // reattached run: seeds the bar from the status snapshot (which usually
+  // resolves first) so it paints immediately, then the real SSE progress
+  // event overwrites it with live numbers.
+  const displayProgress: IngestProgress | null =
+    progress ??
+    (status !== null && status.running && status.phase !== null
+      ? { phase: status.phase, done: status.chunksEmbedded, total: status.chunksTotal }
+      : null);
 
-  return { status, progress, running, error, start };
+  return { status, progress: displayProgress, running, error, start, stop };
 }

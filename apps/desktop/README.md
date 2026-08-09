@@ -32,11 +32,56 @@ pnpm build       # TypeScript check + Vite production bundle
 
 Keep the API local unless you add authentication, authorization, and an appropriate CORS policy. The backend is intentionally a trusted-local-user service; `VITE_API_KEY`/`API_KEY` add opt-in request authentication, not multi-tenant security.
 
+## Interface
+
+The window is split into three collapsible zones: a conversation sidebar on the left, the chat transcript in the center, and a sources panel on the right.
+
+### Theme and language
+
+The interface uses a dedicated "chancery" HeroUI theme (`chancery-light` / `chancery-dark`) — near-black and white surfaces with Swiss red (`#d52b1e` light, `#ff4438` dark) as the only accent. By default it follows the OS light/dark preference, including live changes while the app is running. A header button, between the backend status dot and the settings gear, overrides this: it cycles System → Light → Dark → System, and the chosen mode persists to `localStorage` (`slr.theme`) across restarts until you cycle back to System.
+
+UI copy is available in English, German, French, Italian, and European Portuguese; switch it from Settings > General. The corpus itself is only indexed in German, French, and Italian, so English and Portuguese fall back to the closest corpus language (German and French, respectively) when searching or asking a question — answer text still reflects the retrieved source language.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+K` | Focus the corpus search input, expanding the left sidebar if collapsed |
+| `Ctrl+N` | Start a new conversation |
+| `Ctrl+B` | Toggle the left sidebar |
+| `Ctrl+J` | Toggle the right sources panel |
+| `Ctrl+,` | Open Settings |
+
+Shortcuts are handled inside the window only (no OS-global registration) and are suppressed while typing in a text field, except `Ctrl+K` and `Ctrl+N`, which always work. On macOS, `Cmd` is accepted in place of `Ctrl`.
+
+### Conversation history
+
+Conversations and messages persist locally in a SQLite database (via `tauri-plugin-sql`) and survive app restarts. The sidebar lists conversations by most recently updated, and supports resuming, inline renaming, and deletion (with a confirm popover). Timestamps are stored as ISO-8601 UTC strings.
+
+The database file, `conversations.db`, lives in the OS-standard per-app configuration directory:
+
+| Platform | Path |
+| --- | --- |
+| Windows | `%APPDATA%\com.samusafe.swiss-legal-rag\conversations.db` |
+| macOS | `~/Library/Application Support/com.samusafe.swiss-legal-rag/conversations.db` |
+| Linux | `~/.config/com.samusafe.swiss-legal-rag/conversations.db` |
+
+### Corpus search and article preview
+
+The sidebar's search field calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Selecting a result — or clicking a citation chip in the chat transcript — opens an article preview showing the matched chunk text, with a "View on Fedlex" button that opens the official article page in the system browser.
+
 ## Behavior
 
 - The composer is disabled until `/health` responds successfully.
 - A chat shows sources first, accumulates optional `thinking` events separately, then streams answer tokens. Reasoning is never used for citation extraction. The expandable reasoning view is a debug feature, off by default (`VITE_SHOW_THINKING`) — raw model reasoning can be unpredictable and is not intended for end users. With the flag off, the transcript still shows a static "Searching articles…" / "Thinking…" indicator; the flag only gates the expandable disclosure of the reasoning text itself.
-- A mid-stream error preserves the partial answer; Stop aborts the request and marks the partial answer as stopped.
-- The corpus panel starts the server-side `resolve -> fetch -> parse -> embed` pipeline and displays live progress. Closing it does not cancel ingestion.
+- A mid-stream error preserves the partial answer; Stop aborts the request and marks the partial answer as stopped. Either way, the partial answer is saved to the conversation's history, not just kept on screen.
+- The header gear (or `Ctrl+,`) opens Settings — General (UI language, native OS notifications), Corpus, and Export tabs.
+- The Corpus tab starts the server-side `resolve -> fetch -> parse -> embed` pipeline and displays live progress. Progress is tracked by a persistent app-level subscription to the server's progress stream that stays attached for the whole session, so closing and reopening the panel does not lose or restart it. Closing the panel does not cancel ingestion; a Stop button (with a confirm popover) cancels the current phase server-side.
 - Updating the corpus only re-embeds new or changed articles — expect a long CPU-bound job on first ingest, but reruns are incremental (see `apps/ingestion/README.md`).
+- With OS notifications enabled (Settings > General; on by default, permission requested on enable), finishing an answer while the window is in the background shows a native notification with the answer's first line.
+- The Export tab saves any conversation as JSON or Markdown via the native save dialog.
 - Sources are scoped to the latest selected answer and open their official Fedlex ELI links in the system browser.
+
+## Icon
+
+The application icon (scales of justice, white beam with Swiss-red pans on a near-black background) is original artwork created for this project. It is not a third-party asset and carries no license obligation.

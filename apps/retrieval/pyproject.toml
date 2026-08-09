@@ -10,7 +10,7 @@ dependencies = [
     "pydantic==2.13.4",
     "psycopg[binary]==3.3.4",
     "pgvector==0.5.0",
-    "sentence-transformers==5.6.1",
+    "sentence-transformers==5.7.0",
     "python-dotenv==1.2.2",
     "langdetect==1.0.9",
 ]

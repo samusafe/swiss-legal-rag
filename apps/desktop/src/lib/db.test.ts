@@ -42,11 +42,14 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(FIXED_NOW));
   vi.spyOn(crypto, "randomUUID").mockReturnValue(FIXED_UUID);
+  // All existing tests below exercise real Tauri-mode behavior.
+  vi.stubGlobal("__TAURI_INTERNALS__", {});
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("db", () => {
@@ -247,5 +250,51 @@ describe("db", () => {
     expect(querySql).toContain("WHERE conversation_id = $1");
     expect(querySql).toContain("ORDER BY created_at ASC");
     expect(bindValues).toEqual(["conv-1"]);
+  });
+});
+
+describe("db (non-Tauri / browser mode)", () => {
+  it("never touches the sql plugin: every write/read is a graceful no-op", async () => {
+    vi.unstubAllGlobals(); // undo beforeEach's Tauri stub — no __TAURI_INTERNALS__ here
+    const conn = makeConn();
+    const db = await freshDb(conn);
+    const sql = await import("@tauri-apps/plugin-sql");
+    // `sql.default.load` is the one mock the hoisted `vi.mock` factory
+    // creates for the whole file, so its call count carries over from every
+    // earlier Tauri-mode test above (each of which legitimately calls it
+    // once) — a delta from this snapshot, not `.not.toHaveBeenCalled()`, is
+    // the correct way to prove *this* test never calls it.
+    const loadCallsBefore = vi.mocked(sql.default.load).mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await db.initDb();
+    expect(await db.listConversations()).toEqual([]);
+    const created = await db.createConversation("New chat");
+    expect(created).toEqual({
+      id: FIXED_UUID,
+      title: "New chat",
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    await db.renameConversation("conv-1", "Renamed");
+    await db.deleteConversation("conv-1");
+    await db.appendMessage({
+      conversationId: "conv-1",
+      role: "user",
+      content: "Hello",
+      sourcesJson: null,
+    });
+    expect(await db.getMessages("conv-1")).toEqual([]);
+
+    // The plugin is never loaded, so it can never throw the raw
+    // "Cannot read properties of undefined (reading 'invoke')" error.
+    expect(vi.mocked(sql.default.load).mock.calls.length).toBe(loadCallsBefore);
+    expect(conn.execute).not.toHaveBeenCalled();
+    expect(conn.select).not.toHaveBeenCalled();
+    // One console.warn regardless of how many browser-mode calls were made.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "lib/db: no Tauri runtime detected — conversations will not persist.",
+    );
   });
 });

@@ -1,5 +1,5 @@
 import { HeroUIProvider } from "@heroui/react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import App from "./App";
@@ -31,7 +31,6 @@ vi.mock("./lib/api", () => ({
 }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
-  openPath: vi.fn(),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
@@ -118,7 +117,7 @@ it("toggles the sources panel with ctrl+j, unmounting it so its controls leave t
   expect(screen.queryByRole("button", { name: "Expand sources" })).not.toBeInTheDocument();
 });
 
-it("opens an ArticlePreview modal, primed from the clicked result, when a sidebar search result is selected", async () => {
+it("opens an ArticlePreview modal, primed from the clicked result, when a palette search result is selected", async () => {
   searchMock.mockReset();
   searchMock.mockResolvedValue([RESULT]);
   const user = userEvent.setup();
@@ -129,14 +128,18 @@ it("opens an ArticlePreview modal, primed from the clicked result, when a sideba
   );
   await screen.findByText("The corpus is empty. Run ingestion to start asking questions.");
 
-  await user.type(screen.getByPlaceholderText("Search…"), "kündigungsfrist");
+  await user.click(screen.getByRole("button", { name: "Open article search" }));
+  await user.type(screen.getByPlaceholderText("Search articles…"), "kündigungsfrist");
   await screen.findByText("SR 220 · Art. 335c", undefined, { timeout: 1000 });
   searchMock.mockClear();
 
   await user.click(screen.getByText("SR 220 · Art. 335c"));
 
-  const dialog = await screen.findByRole("dialog");
-  expect(within(dialog).getByText("Die Kündigungsfrist beträgt einen Monat.")).toBeInTheDocument();
+  // Selecting a result closes the palette and opens the preview.
+  expect(
+    await screen.findByText("Die Kündigungsfrist beträgt einen Monat."),
+  ).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("Search articles…")).not.toBeInTheDocument();
   // The clicked row already carried the match — the preview must reuse it,
   // not re-fetch.
   expect(searchMock).not.toHaveBeenCalled();
@@ -171,22 +174,25 @@ it("opens Settings with the Ctrl+, shortcut", async () => {
   expect(screen.getByRole("tab", { name: "Corpus" })).toBeInTheDocument();
 });
 
-it("focuses the sidebar search input on Ctrl+K, including when the panel is already expanded", async () => {
+it("opens the article search palette on Ctrl+K, autofocused, and closes it on a second Ctrl+K", async () => {
   render(
     <HeroUIProvider>
       <App />
     </HeroUIProvider>,
   );
   await screen.findByText("The corpus is empty. Run ingestion to start asking questions.");
-  // The left panel is expanded by default — this exercises the exact bug
-  // case from the review: Ctrl+K on an already-expanded sidebar must still
-  // move focus, not just no-op on `panels.left`.
-  const searchInput = screen.getByPlaceholderText("Search…");
-  expect(document.activeElement).not.toBe(searchInput);
+  expect(screen.queryByPlaceholderText("Search articles…")).not.toBeInTheDocument();
 
   fireEvent.keyDown(document, { key: "k", ctrlKey: true });
 
-  expect(document.activeElement).toBe(searchInput);
+  const searchInput = await screen.findByPlaceholderText("Search articles…");
+  await waitFor(() => expect(document.activeElement).toBe(searchInput));
+
+  fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+
+  await waitFor(() =>
+    expect(screen.queryByPlaceholderText("Search articles…")).not.toBeInTheDocument(),
+  );
 });
 
 it("surfaces a rejected conversation delete as a visible error banner", async () => {
@@ -228,6 +234,27 @@ it("surfaces a rejected conversation rename as a visible error banner", async ()
   await user.click(within(dialog).getByRole("button", { name: "Rename" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+});
+
+it("stacks below lg (chat primary, bounded sources, overlay sidebar) but keeps the lg+ 3-column grid", async () => {
+  render(
+    <HeroUIProvider>
+      <App />
+    </HeroUIProvider>,
+  );
+  await screen.findByText("The corpus is empty. Run ingestion to start asking questions.");
+
+  const layout = screen.getByTestId("app-layout");
+  expect(layout).toHaveClass("flex", "flex-col", "lg:grid", "lg:grid-cols-[auto_1fr_auto]");
+
+  const sourcesColumn = screen.getByTestId("sources-column");
+  expect(sourcesColumn).toHaveClass("max-h-56", "overflow-y-auto", "lg:max-h-none");
+
+  // Sidebar overlays instead of consuming width below lg; reverts to a
+  // normal in-flow column at lg+. Full stacking/overlay behavior on a real
+  // narrow viewport can only be confirmed in `pnpm tauri dev`.
+  const sidebar = screen.getByRole("navigation", { name: "Conversations" });
+  expect(sidebar).toHaveClass("absolute", "lg:static");
 });
 
 it("surfaces a rejected mount-time conversation-list refresh as a visible error banner", async () => {

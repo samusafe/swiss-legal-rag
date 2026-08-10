@@ -4,6 +4,7 @@ import { ArticlePreviewModal, primeArticlePreviewCache } from "./components/Arti
 import { Composer } from "./components/Composer";
 import { Header } from "./components/Header";
 import { MessageList } from "./components/MessageList";
+import { SearchPalette } from "./components/SearchPalette";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
 import { SourcesPanel } from "./components/SourcesPanel";
@@ -90,9 +91,15 @@ export default function App() {
   const subtitle =
     selectedIndex !== null ? t("sources.answerN", { n: answerOrdinal }) : t("sources.latest");
 
+  // Bumped every time handleNew fires (the "+" button or Ctrl+N) so the
+  // composer moves focus there — otherwise a fresh app gives zero visible
+  // feedback (the conversation row is only created on first message).
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+
   const handleNew = useCallback(() => {
     setSelectedIndex(null);
     reset();
+    setComposerFocusSignal((n) => n + 1);
   }, [reset]);
 
   const handleResume = useCallback(
@@ -118,18 +125,12 @@ export default function App() {
     [lang],
   );
 
-  // Bumped on every Ctrl+K so Sidebar can (re-)focus the search input even
-  // when the left panel is already expanded (plain `left: true` is then a
-  // no-op state update and triggers no re-render for Sidebar to react to).
-  const [searchFocusSignal, setSearchFocusSignal] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useShortcuts({
     "ctrl+b": toggleLeft,
     "ctrl+n": handleNew,
-    "ctrl+k": () => {
-      setPanels((prev) => ({ ...prev, left: true }));
-      setSearchFocusSignal((n) => n + 1);
-    },
+    "ctrl+k": () => setPaletteOpen((prev) => !prev),
     "ctrl+j": toggleRight,
     "ctrl+,": () => setSettingsOpen(true),
   });
@@ -140,6 +141,7 @@ export default function App() {
         online={online}
         ingestPercent={ingestPercent}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSearch={() => setPaletteOpen(true)}
         theme={theme}
         setTheme={setTheme}
       />
@@ -153,7 +155,14 @@ export default function App() {
           {t("banner.corpusEmpty")}
         </div>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-[auto_1fr_auto]">
+      {/* Below `lg` the three zones stack: sidebar becomes an overlay/rail
+          (see Sidebar's own responsive classes) instead of consuming width,
+          chat is primary, and sources moves below chat with a bounded
+          height. `lg+` is untouched: the original 3-column grid. */}
+      <div
+        className="relative flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[auto_1fr_auto]"
+        data-testid="app-layout"
+      >
         <Sidebar
           collapsed={!panels.left}
           onToggle={toggleLeft}
@@ -167,10 +176,8 @@ export default function App() {
           onDelete={(id) => {
             conversations.remove(id).catch(handleConvError);
           }}
-          onSearchSelect={handleSearchSelect}
-          searchFocusSignal={searchFocusSignal}
         />
-        <main className="flex min-h-0 flex-col">
+        <main className="flex min-h-0 flex-1 flex-col">
           <MessageList
             messages={messages}
             streaming={streaming}
@@ -183,6 +190,7 @@ export default function App() {
             disabled={streaming || !online}
             offline={!online}
             streaming={streaming}
+            focusSignal={composerFocusSignal}
             onSend={(question) => {
               setSelectedIndex(null);
               setConvError(null);
@@ -199,7 +207,10 @@ export default function App() {
             onStop={stop}
           />
         </main>
-        <div className="relative flex min-h-0">
+        <div
+          className="relative flex max-h-56 min-h-0 overflow-y-auto lg:max-h-none lg:overflow-visible"
+          data-testid="sources-column"
+        >
           <motion.div
             initial={false}
             animate={{ width: panels.right ? "20rem" : "0rem" }}
@@ -243,6 +254,11 @@ export default function App() {
         ingest={ingest}
       />
       <ArticlePreviewModal target={previewTarget} onClose={() => setPreviewTarget(null)} />
+      <SearchPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onSelect={handleSearchSelect}
+      />
     </div>
   );
 }

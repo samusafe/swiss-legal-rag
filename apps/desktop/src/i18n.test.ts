@@ -12,7 +12,7 @@ describe("i18n", () => {
   });
 
   it("t() returns English by default", () => {
-    expect(t("search.placeholder")).toBe("Search…");
+    expect(t("search.placeholder")).toBe("Search articles…");
   });
 
   it("t() returns German after setLang('de')", () => {
@@ -22,7 +22,7 @@ describe("i18n", () => {
       result.current.setLang("de");
     });
 
-    expect(t("search.placeholder")).toBe("Suchen…");
+    expect(t("search.placeholder")).toBe("Artikel suchen…");
   });
 
   it("t() returns European Portuguese after setLang('pt')", () => {
@@ -32,7 +32,7 @@ describe("i18n", () => {
       result.current.setLang("pt");
     });
 
-    expect(t("search.placeholder")).toBe("Pesquisar…");
+    expect(t("search.placeholder")).toBe("Pesquisar artigos…");
   });
 
   it("useLang re-renders subscribers when language changes", () => {
@@ -45,7 +45,7 @@ describe("i18n", () => {
     });
 
     expect(result.current.lang).toBe("fr");
-    expect(t("search.placeholder")).toBe("Rechercher…");
+    expect(t("search.placeholder")).toBe("Rechercher des articles…");
   });
 
   it("setLang persists the choice under slr.lang via prefs", () => {
@@ -67,7 +67,7 @@ describe("i18n", () => {
     const { result } = renderHook(() => fresh.useLang());
 
     expect(result.current.lang).toBe("en");
-    expect(fresh.t("search.placeholder")).toBe("Search…");
+    expect(fresh.t("search.placeholder")).toBe("Search articles…");
   });
 
   it("prefs round-trips JSON values", () => {

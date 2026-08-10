@@ -38,7 +38,7 @@ The window is split into three collapsible zones: a conversation sidebar on the 
 
 ### Theme and language
 
-The interface uses a dedicated "chancery" HeroUI theme (`chancery-light` / `chancery-dark`) — near-black and white surfaces with Swiss red (`#d52b1e` light, `#ff4438` dark) as the only accent. By default it follows the OS light/dark preference, including live changes while the app is running. A header button, between the backend status dot and the settings gear, overrides this: it cycles System → Light → Dark → System, and the chosen mode persists to `localStorage` (`slr.theme`) across restarts until you cycle back to System.
+The interface uses a dedicated "chancery" HeroUI theme (`chancery-light` / `chancery-dark`) — near-black and white surfaces with Swiss red (`#d52b1e` light, `#ff4438` dark) as the only accent. By default it follows the OS light/dark preference, including live changes while the app is running. A header dropdown, between the backend status dot and the settings gear, overrides this with an explicit System / Light / Dark choice; the chosen mode persists to `localStorage` (`slr.theme`) across restarts. The resolved theme is also applied before the app's own JavaScript runs, so switching or restarting never shows a flash of the wrong background.
 
 UI copy is available in English, German, French, Italian, and European Portuguese; switch it from Settings > General. The corpus itself is only indexed in German, French, and Italian, so English and Portuguese fall back to the closest corpus language (German and French, respectively) when searching or asking a question — answer text still reflects the retrieved source language.
 
@@ -46,7 +46,7 @@ UI copy is available in English, German, French, Italian, and European Portugues
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+K` | Focus the corpus search input, expanding the left sidebar if collapsed |
+| `Ctrl+K` | Open the article search palette (press again to close it) |
 | `Ctrl+N` | Start a new conversation |
 | `Ctrl+B` | Toggle the left sidebar |
 | `Ctrl+J` | Toggle the right sources panel |
@@ -68,7 +68,7 @@ The database file, `conversations.db`, lives in the OS-standard per-app configur
 
 ### Corpus search and article preview
 
-The sidebar's search field calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Selecting a result — or clicking a citation chip in the chat transcript — opens an article preview showing the matched chunk text, with a "View on Fedlex" button that opens the official article page in the system browser.
+A Spotlight-style search palette, opened from the header trigger or `Ctrl+K`, calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Because retrieval runs on CPU-only hardware, a search can take anywhere from a few seconds to about a minute; the palette shows a persistent spinner and status label for the whole wait rather than appearing to hang. Results are navigable with the arrow keys and select with Enter or a click. Selecting a result — or clicking a citation chip in the chat transcript — opens an article preview showing the matched chunk text, with a "View on Fedlex" button that opens the official article page in the system browser.
 
 ## Behavior
 

@@ -1,4 +1,5 @@
-import { Button } from "@heroui/react";
+import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger } from "@heroui/react";
+import type { Key } from "react";
 import type { ThemePref } from "../hooks/useTheme";
 import { t } from "../i18n";
 import type { UiKey } from "../i18n";
@@ -66,13 +67,23 @@ function MonitorIcon() {
   );
 }
 
-// system -> light -> dark -> system (a 2-state sun/moon toggle would make
-// "system" unreachable once clicked).
-const THEME_CYCLE: Record<ThemePref, ThemePref> = {
-  system: "light",
-  light: "dark",
-  dark: "system",
-};
+function SearchIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className="h-4 w-4 shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
+    </svg>
+  );
+}
+
+const THEME_OPTIONS: readonly ThemePref[] = ["system", "light", "dark"];
 
 const THEME_ICONS: Record<ThemePref, typeof SunIcon> = {
   system: MonitorIcon,
@@ -86,16 +97,22 @@ const THEME_LABEL_KEYS: Record<ThemePref, UiKey> = {
   dark: "theme.dark",
 };
 
+function isThemePref(key: Key): key is ThemePref {
+  return key === "system" || key === "light" || key === "dark";
+}
+
 export function Header({
   online,
   ingestPercent,
   onOpenSettings,
+  onOpenSearch,
   theme,
   setTheme,
 }: {
   online: boolean;
   ingestPercent: number | null;
   onOpenSettings: () => void;
+  onOpenSearch: () => void;
   theme: ThemePref;
   setTheme: (theme: ThemePref) => void;
 }) {
@@ -108,15 +125,45 @@ export function Header({
         title={online ? t("health.online") : t("health.offline")}
         className={`h-2.5 w-2.5 rounded-full ${online ? "bg-success" : "bg-danger"}`}
       />
-      <Button
-        size="sm"
-        variant="light"
-        aria-label={`${t("theme.label")}: ${t(THEME_LABEL_KEYS[theme])}`}
-        className="ml-auto min-w-0 px-2 text-foreground"
-        onPress={() => setTheme(THEME_CYCLE[theme])}
-      >
-        <ThemeIcon />
-      </Button>
+      <div className="flex flex-1 justify-center">
+        <button
+          type="button"
+          aria-label={t("search.openPalette")}
+          onClick={onOpenSearch}
+          className="flex w-full max-w-md items-center gap-2 rounded-lg border border-divider px-3 py-1.5 text-sm text-foreground-400 transition-colors hover:border-foreground-400 hover:text-foreground"
+        >
+          <SearchIcon />
+          <span className="flex-1 text-left">{t("search.placeholder")}</span>
+          <kbd className="hidden shrink-0 rounded border border-divider px-1.5 py-0.5 text-xs text-foreground-400 lg:inline">
+            {t("search.shortcut")}
+          </kbd>
+        </button>
+      </div>
+      <Dropdown>
+        <DropdownTrigger>
+          <Button
+            size="sm"
+            variant="light"
+            aria-label={`${t("theme.label")}: ${t(THEME_LABEL_KEYS[theme])}`}
+            className="ml-auto min-w-0 px-2 text-foreground"
+          >
+            <ThemeIcon />
+          </Button>
+        </DropdownTrigger>
+        <DropdownMenu
+          aria-label={t("theme.label")}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={new Set([theme])}
+          onAction={(key) => {
+            if (isThemePref(key)) setTheme(key);
+          }}
+        >
+          {THEME_OPTIONS.map((option) => (
+            <DropdownItem key={option}>{t(THEME_LABEL_KEYS[option])}</DropdownItem>
+          ))}
+        </DropdownMenu>
+      </Dropdown>
       <Button
         size="sm"
         variant="light"

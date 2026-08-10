@@ -4,6 +4,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
 
+function renderComposer(focusSignal: number) {
+  return render(
+    <HeroUIProvider>
+      <Composer
+        disabled={false}
+        offline={false}
+        streaming={false}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        focusSignal={focusSignal}
+      />
+    </HeroUIProvider>,
+  );
+}
+
 describe("Composer", () => {
   it("calls onSend with trimmed text and clears the draft on Send click", async () => {
     const user = userEvent.setup();
@@ -117,5 +132,32 @@ describe("Composer", () => {
 
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+
+  it("does not steal focus on mount (focusSignal starts at 0)", () => {
+    renderComposer(0);
+
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  });
+
+  it("focuses the textarea when focusSignal is bumped, e.g. from '+' or Ctrl+N", () => {
+    const { rerender } = renderComposer(0);
+    const textbox = screen.getByRole("textbox");
+    expect(document.activeElement).not.toBe(textbox);
+
+    rerender(
+      <HeroUIProvider>
+        <Composer
+          disabled={false}
+          offline={false}
+          streaming={false}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          focusSignal={1}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(document.activeElement).toBe(textbox);
   });
 });

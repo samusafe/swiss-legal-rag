@@ -1,7 +1,6 @@
 import { Button, Popover, PopoverContent, PopoverTrigger, Progress } from "@heroui/react";
 import type { useIngest } from "../hooks/useIngest";
 import { t } from "../i18n";
-import { openCorpusYaml } from "../lib/open";
 
 /** Corpus tab body of SettingsModal — same status/progress/start/error
  * behavior as the old CorpusModal, plus stop (with a confirm popover) for a
@@ -60,12 +59,7 @@ export function CorpusPanel({ ingest }: { ingest: ReturnType<typeof useIngest> }
           </Popover>
         )}
       </div>
-      <p className="text-xs text-foreground-400">
-        Chat stays usable — results may be incomplete while embedding.
-      </p>
-      <Button size="sm" variant="light" className="self-start" onPress={openCorpusYaml}>
-        {t("corpus.openFile")}
-      </Button>
+      <p className="text-xs text-foreground-400">{t("corpus.chatUsable")}</p>
     </div>
   );
 }

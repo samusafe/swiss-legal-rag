@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Textarea } from "@heroui/react";
 import { t } from "../i18n";
 
@@ -23,15 +23,26 @@ export function Composer({
   streaming,
   onSend,
   onStop,
+  focusSignal = 0,
 }: {
   disabled: boolean;
   offline: boolean;
   streaming: boolean;
   onSend: (question: string) => void;
   onStop: () => void;
+  // Bumped by the parent (e.g. on "+"/Ctrl+N) to move focus into the
+  // composer — a plain prop change alone wouldn't otherwise trigger an
+  // effect here.
+  focusSignal?: number;
 }) {
   const [draft, setDraft] = useState("");
   const trimmed = draft.trim();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (focusSignal === 0) return; // skip the initial mount
+    textareaRef.current?.focus();
+  }, [focusSignal]);
 
   function submit(): void {
     if (disabled || trimmed === "") return;
@@ -43,6 +54,7 @@ export function Composer({
     <div className="p-3">
       <div className="flex items-end gap-2 rounded-sm border-2 border-foreground p-2">
         <Textarea
+          ref={textareaRef}
           value={draft}
           onValueChange={setDraft}
           minRows={1}

@@ -9,10 +9,6 @@
     "sql:default",
     "sql:allow-execute",
     "notification:default",
-    "dialog:default",
-    {
-      "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**/corpus.yaml" }]
-    }
+    "dialog:default"
   ]
 }

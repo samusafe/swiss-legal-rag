@@ -40,6 +40,23 @@ const CREATE_MESSAGES_SQL = `
   )
 `;
 
+// Same detection open.ts uses for its own Tauri-vs-browser branch: the sql
+// plugin's `invoke` is undefined outside a Tauri webview (plain `pnpm dev`,
+// browser DevTools device emulation), so any real call throws a raw
+// "Cannot read properties of undefined (reading 'invoke')". Guard is on the
+// *environment*, never on a failure — a real error inside Tauri still
+// throws normally through every function below.
+function isTauri(): boolean {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+let warnedBrowserMode = false;
+function warnBrowserModeOnce(): void {
+  if (warnedBrowserMode) return;
+  warnedBrowserMode = true;
+  console.warn("lib/db: no Tauri runtime detected — conversations will not persist.");
+}
+
 // Single lazily-loaded connection, memoized as a promise so concurrent
 // callers before the first resolution all await the same connect+migrate
 // work instead of racing separate Database.load() calls.
@@ -58,10 +75,18 @@ function getDb(): Promise<Database> {
 }
 
 export async function initDb(): Promise<void> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return;
+  }
   await getDb();
 }
 
 export async function listConversations(): Promise<Conversation[]> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return [];
+  }
   const conn = await getDb();
   return conn.select<Conversation[]>(
     `SELECT id, title, created_at AS createdAt, updated_at AS updatedAt
@@ -71,9 +96,13 @@ export async function listConversations(): Promise<Conversation[]> {
 }
 
 export async function createConversation(title: string): Promise<Conversation> {
-  const conn = await getDb();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return { id, title, createdAt: now, updatedAt: now };
+  }
+  const conn = await getDb();
   await conn.execute(
     "INSERT INTO conversations (id, title, created_at, updated_at) VALUES ($1, $2, $3, $4)",
     [id, title, now, now],
@@ -82,6 +111,10 @@ export async function createConversation(title: string): Promise<Conversation> {
 }
 
 export async function renameConversation(id: string, title: string): Promise<void> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return;
+  }
   const conn = await getDb();
   const now = new Date().toISOString();
   await conn.execute(
@@ -111,6 +144,10 @@ export async function renameConversation(id: string, title: string): Promise<voi
 // conversation (parent) they reference, so a partial failure leaves an
 // empty conversation, not orphaned messages pointing at nothing.
 export async function deleteConversation(id: string): Promise<void> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return;
+  }
   const conn = await getDb();
   await conn.execute("DELETE FROM messages WHERE conversation_id = $1", [id]);
   await conn.execute("DELETE FROM conversations WHERE id = $1", [id]);
@@ -119,6 +156,10 @@ export async function deleteConversation(id: string): Promise<void> {
 export async function appendMessage(
   m: Omit<StoredMessage, "id" | "createdAt">,
 ): Promise<void> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return;
+  }
   const conn = await getDb();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -138,6 +179,10 @@ export async function appendMessage(
 }
 
 export async function getMessages(conversationId: string): Promise<StoredMessage[]> {
+  if (!isTauri()) {
+    warnBrowserModeOnce();
+    return [];
+  }
   const conn = await getDb();
   return conn.select<StoredMessage[]>(
     `SELECT id, conversation_id AS conversationId, role, content,

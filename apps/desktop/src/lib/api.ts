@@ -1,4 +1,5 @@
 import { createSseParser, type SseFrame } from "./sse";
+import { logAudit } from "./audit";
 
 export interface Source {
   sr: string;
@@ -76,6 +77,17 @@ async function errorDetail(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+async function failResponse(endpoint: string, response: Response): Promise<never> {
+  const detail = await errorDetail(response);
+  // The API client is the single choke point for error.api events — the
+  // matching backend line is correlated via X-Request-Id in its own log.
+  // null when the header is missing (e.g. a request that never reached the
+  // backend's access_log middleware, such as a network failure or /health).
+  const requestId = response.headers.get("X-Request-Id");
+  logAudit("error.api", { endpoint, status: response.status, message: detail, requestId });
+  throw new ApiError(detail, response.status);
+}
+
 async function* sseEvents<T>(
   response: Response,
   toEvent: (frame: SseFrame) => T,
@@ -137,7 +149,7 @@ export async function* postChat(
     body: JSON.stringify({ question }),
     signal,
   });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/chat", response);
   yield* sseEvents(response, toChatEvent);
 }
 
@@ -169,7 +181,7 @@ export async function search(
     body: JSON.stringify({ q, k, lang }),
     signal,
   });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/search", response);
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
     results: Array<{
@@ -219,7 +231,7 @@ export async function fetchArticle(
     headers: authHeaders(),
     signal,
   });
-  if (!response.ok) throw new ApiError(await errorDetail(response), response.status);
+  if (!response.ok) await failResponse("/article", response);
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
     sr: string;
@@ -262,7 +274,7 @@ export type IngestEvent =
 
 export async function getIngestStatus(): Promise<IngestStatus> {
   const response = await fetch(`${API_BASE_URL}/ingest/status`, { headers: authHeaders() });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/ingest/status", response);
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
     running: boolean;
@@ -285,7 +297,7 @@ export async function postIngest(): Promise<void> {
     method: "POST",
     headers: authHeaders(),
   });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/ingest", response);
 }
 
 export async function postIngestStop(): Promise<void> {
@@ -293,7 +305,7 @@ export async function postIngestStop(): Promise<void> {
     method: "POST",
     headers: authHeaders(),
   });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/ingest/stop", response);
 }
 
 // Backend boundary casts, same contract note as toChatEvent.
@@ -328,6 +340,6 @@ export async function* streamIngestProgress(
     signal,
     headers: authHeaders(),
   });
-  if (!response.ok) throw new Error(await errorDetail(response));
+  if (!response.ok) await failResponse("/ingest/progress", response);
   yield* sseEvents(response, toIngestEvent);
 }

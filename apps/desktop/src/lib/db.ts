@@ -46,7 +46,7 @@ const CREATE_MESSAGES_SQL = `
 // "Cannot read properties of undefined (reading 'invoke')". Guard is on the
 // *environment*, never on a failure — a real error inside Tauri still
 // throws normally through every function below.
-function isTauri(): boolean {
+export function isTauri(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
 
@@ -155,13 +155,13 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export async function appendMessage(
   m: Omit<StoredMessage, "id" | "createdAt">,
-): Promise<void> {
+): Promise<string> {
+  const id = crypto.randomUUID();
   if (!isTauri()) {
     warnBrowserModeOnce();
-    return;
+    return id;
   }
   const conn = await getDb();
-  const id = crypto.randomUUID();
   const now = new Date().toISOString();
   // Same no-transaction reasoning as deleteConversation() above: insert the
   // message (the data that matters) before bumping the parent conversation's
@@ -176,6 +176,7 @@ export async function appendMessage(
     now,
     m.conversationId,
   ]);
+  return id;
 }
 
 export async function getMessages(conversationId: string): Promise<StoredMessage[]> {

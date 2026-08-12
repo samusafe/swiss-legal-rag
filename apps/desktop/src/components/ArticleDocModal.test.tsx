@@ -16,10 +16,15 @@ vi.mock("../lib/api", async (importOriginal) => {
 vi.mock("../lib/open", () => ({
   openExternal: vi.fn(),
 }));
+vi.mock("../lib/audit", () => ({
+  logAudit: vi.fn(),
+}));
 
 import { ApiError, fetchArticle } from "../lib/api";
+import { logAudit } from "../lib/audit";
 
 const fetchArticleMock = vi.mocked(fetchArticle);
+const logAuditMock = vi.mocked(logAudit);
 
 const article: Article = {
   sr: "220",
@@ -36,6 +41,7 @@ const article: Article = {
 
 beforeEach(() => {
   fetchArticleMock.mockReset();
+  logAuditMock.mockReset();
 });
 
 function renderModal(target: { refs: { sr: string; article: string; lang: "de" | "fr" | "it" }[]; index: number } | null) {
@@ -96,6 +102,33 @@ describe("ArticleDocModal", () => {
 
     expect(await screen.findByText("2 / 2")).toBeInTheDocument();
     expect(fetchArticleMock).toHaveBeenLastCalledWith("935.61", "7", "fr", expect.anything());
+  });
+
+  test("switching the language tab logs article.langSwitch", async () => {
+    fetchArticleMock.mockResolvedValue(article);
+    const user = userEvent.setup();
+    renderModal({ refs: [{ sr: "220", article: "335b", lang: "fr" }], index: 0 });
+
+    await screen.findByText("First paragraph.");
+    await user.click(screen.getByRole("tab", { name: "DE" }));
+
+    expect(logAuditMock).toHaveBeenCalledWith("article.langSwitch", {
+      sr: "220",
+      article: "335b",
+      from: "fr",
+      to: "de",
+    });
+  });
+
+  test("pressing the Fedlex button logs article.fedlex", async () => {
+    fetchArticleMock.mockResolvedValue(article);
+    const user = userEvent.setup();
+    renderModal({ refs: [{ sr: "220", article: "335b", lang: "fr" }], index: 0 });
+
+    await screen.findByText("First paragraph.");
+    await user.click(screen.getByRole("button", { name: /Fedlex/i }));
+
+    expect(logAuditMock).toHaveBeenCalledWith("article.fedlex", { sr: "220", article: "335b" });
   });
 
   test("404 shows not-in-language message", async () => {

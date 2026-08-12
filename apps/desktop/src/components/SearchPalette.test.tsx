@@ -8,10 +8,15 @@ import { SearchPalette } from "./SearchPalette";
 vi.mock("../lib/api", () => ({
   search: vi.fn(),
 }));
+vi.mock("../lib/audit", () => ({
+  logAudit: vi.fn(),
+}));
 
 import { search } from "../lib/api";
+import { logAudit } from "../lib/audit";
 
 const searchMock = vi.mocked(search);
+const logAuditMock = vi.mocked(logAudit);
 
 const RESULT_A: SearchResult = {
   sr: "220",
@@ -37,6 +42,7 @@ const RESULT_B: SearchResult = {
 beforeEach(() => {
   searchMock.mockReset();
   searchMock.mockResolvedValue([]);
+  logAuditMock.mockReset();
 });
 
 function renderPalette(overrides: Partial<Parameters<typeof SearchPalette>[0]> = {}) {
@@ -78,6 +84,21 @@ describe("SearchPalette", () => {
     expect(searchMock).not.toHaveBeenCalled();
     await waitFor(() => expect(searchMock).toHaveBeenCalled(), { timeout: 1000 });
     expect(searchMock).toHaveBeenCalledWith("termination", 8, "de", expect.any(AbortSignal));
+  });
+
+  it("logs search.query with the query, lang and result count once results land", async () => {
+    searchMock.mockResolvedValue([RESULT_A]);
+    const user = userEvent.setup();
+    renderPalette();
+
+    await user.type(screen.getByPlaceholderText("Search articles…"), "frist");
+
+    await screen.findByText("SR 220 · Art. 335c", undefined, { timeout: 1000 });
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "search.query",
+      expect.objectContaining({ query: expect.any(String), results: expect.any(Number) }),
+      expect.any(Number),
+    );
   });
 
   it("shows a persistent searching state (spinner + label) while the request is in flight", async () => {

@@ -5,6 +5,7 @@ import { appendMessage, createConversation, getMessages } from "../lib/db";
 import { extractCitations } from "../lib/citations";
 import { t } from "../i18n";
 import { prefs } from "../lib/prefs";
+import { logAudit } from "../lib/audit";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -77,6 +78,7 @@ export function useChat() {
     async (question: string): Promise<void> => {
       if (abortRef.current !== null) return; // one in-flight request at a time
       const generation = ++generationRef.current;
+      const sendStart = performance.now();
       const isCurrent = () => generationRef.current === generation;
       const controller = new AbortController();
       abortRef.current = controller;
@@ -97,6 +99,9 @@ export function useChat() {
       let convId = conversationIdRef.current;
       let finalText = "";
       let finalSources: Source[] = [];
+      let doneCitations: Citation[] | null = null;
+      let doneModel: string | null = null;
+      let answerMessageId: string | null = null;
       // Persists the assistant reply at most once per turn, whichever path
       // gets there first (clean completion below, or the catch block on stop
       // /throw) — without this guard, a failing clean-completion save would
@@ -106,7 +111,7 @@ export function useChat() {
       async function persistAnswer(): Promise<void> {
         if (answerPersisted || convId === null) return;
         answerPersisted = true;
-        await appendMessage({
+        answerMessageId = await appendMessage({
           conversationId: convId,
           role: "assistant",
           content: finalText,
@@ -121,20 +126,38 @@ export function useChat() {
         if (finalText === "") return;
         await persistAnswer();
       }
+      function logAnswer(outcome: "done" | "stopped" | "failed"): void {
+        logAudit(
+          "chat.answer",
+          {
+            conversationId: convId,
+            messageId: answerMessageId,
+            // null on the stopped/failed paths: the SSE `done` event never
+            // arrived, so there's no model to report.
+            model: doneModel,
+            outcome,
+            refusal: outcome === "done" && (doneCitations?.length ?? 0) === 0,
+            citations: doneCitations?.length ?? 0,
+          },
+          Math.round(performance.now() - sendStart),
+        );
+      }
       try {
         if (convId === null) {
           const conversation = await createConversation(question.slice(0, 60));
           if (!isCurrent()) return; // superseded while awaiting the DB write
           convId = conversation.id;
           setConvId(convId);
+          logAudit("convo.create", { conversationId: convId });
         }
-        await appendMessage({
+        const questionId = await appendMessage({
           conversationId: convId,
           role: "user",
           content: question,
           sourcesJson: null,
         });
         if (!isCurrent()) return;
+        logAudit("chat.question", { conversationId: convId, messageId: questionId });
 
         let hadError = false;
         for await (const event of postChat(question, controller.signal)) {
@@ -158,6 +181,8 @@ export function useChat() {
               );
               break;
             case "done": {
+              doneCitations = event.citations;
+              doneModel = event.model;
               // A refusal answer cites nothing — hide its sources rather than
               // leaving the last-searched articles displayed as if relevant.
               const cleared = event.citations.length === 0;
@@ -187,6 +212,7 @@ export function useChat() {
         // completed turn once (not per-chunk). A failure here falls through
         // to the catch block below like any other thrown error.
         await persistAnswer();
+        logAnswer(hadError ? "failed" : "done");
         // An in-band `error` event still falls through this same
         // persistence path (see the switch above) — only notify on a
         // genuinely clean completion, not a stream that ended with an error.
@@ -205,6 +231,7 @@ export function useChat() {
           await persistPartialAnswer().catch((persistError: unknown) => {
             setBanner(errorMessage(persistError));
           });
+          logAnswer("stopped");
         } else {
           const message = errorMessage(error);
           // Nothing streamed yet: drop the empty assistant bubble; the banner
@@ -225,6 +252,7 @@ export function useChat() {
           await persistPartialAnswer().catch((persistError: unknown) => {
             setBanner(errorMessage(persistError));
           });
+          logAnswer("failed");
         }
       } finally {
         if (isCurrent()) {

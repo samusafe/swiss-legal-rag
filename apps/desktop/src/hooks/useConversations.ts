@@ -8,6 +8,7 @@ import {
   renameConversation,
 } from "../lib/db";
 import type { Conversation, StoredMessage } from "../lib/db";
+import { logAudit } from "../lib/audit";
 
 // Thin React state wrapper over lib/db.ts. Mutations throw on failure (no
 // swallowing) — callers are expected to surface errors via toast/banner.
@@ -40,6 +41,7 @@ export function useConversations() {
   const rename = useCallback(
     async (id: string, title: string): Promise<void> => {
       await renameConversation(id, title);
+      logAudit("convo.rename", { conversationId: id });
       await refresh();
     },
     [refresh],
@@ -48,15 +50,17 @@ export function useConversations() {
   const remove = useCallback(
     async (id: string): Promise<void> => {
       await deleteConversation(id);
+      logAudit("convo.delete", { conversationId: id });
       await refresh();
     },
     [refresh],
   );
 
   const appendMessage = useCallback(
-    async (m: Omit<StoredMessage, "id" | "createdAt">): Promise<void> => {
-      await dbAppendMessage(m);
+    async (m: Omit<StoredMessage, "id" | "createdAt">): Promise<string> => {
+      const id = await dbAppendMessage(m);
       await refresh();
+      return id;
     },
     [refresh],
   );

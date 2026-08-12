@@ -106,6 +106,17 @@ def test_cors_allows_desktop_webview_origins() -> None:
     assert response.headers["access-control-allow-origin"] == "http://localhost:1420"
 
 
+def test_cors_exposes_x_request_id_header() -> None:
+    # I3: without Access-Control-Expose-Headers, X-Request-Id is set on the
+    # wire but unreadable by response.headers.get() in the desktop webview,
+    # since it's a cross-origin request (tauri://localhost / localhost:1420
+    # calling localhost:8000).
+    with _client(deps_with([])) as client:
+        response = client.get("/health", headers={"Origin": "http://localhost:1420"})
+
+    assert response.headers["access-control-expose-headers"] == "X-Request-Id"
+
+
 def test_search_returns_503_when_ollama_unreachable() -> None:
     def failing_embed(text: str) -> list[float]:
         raise RuntimeError("Ollama down")
@@ -572,6 +583,76 @@ def test_article_rejects_bad_lang() -> None:
         response = client.get("/article", params={"sr": "220", "article": "1", "lang": "en"})
 
     assert response.status_code == 422
+
+
+def _last_stderr_json(capfd) -> dict:
+    err = capfd.readouterr().err
+    lines = [ln for ln in err.strip().splitlines() if ln.startswith("{")]
+    assert lines, f"no JSON access-log line on stderr: {err!r}"
+    return json.loads(lines[-1])
+
+
+def test_access_log_emits_json_line_with_request_id(capfd) -> None:
+    with _client(deps_with([])) as client:
+        response = client.post("/search", json={"q": "frage", "lang": "de"})
+
+    line = _last_stderr_json(capfd)
+    assert line["method"] == "POST" and line["path"] == "/search"
+    assert line["status"] == response.status_code
+    assert isinstance(line["duration_ms"], int)
+    assert line["request_id"] == response.headers["X-Request-Id"]
+    assert line["ts"].endswith("+00:00")
+
+
+def test_access_log_skips_health(capfd) -> None:
+    with _client(deps_with([])) as client:
+        response = client.get("/health")
+
+    err = capfd.readouterr().err
+    assert not [ln for ln in err.strip().splitlines() if ln.startswith("{")]
+    assert "X-Request-Id" not in response.headers
+
+
+def test_access_log_records_error_status(capfd) -> None:
+    def failing_dense(vector: list[float], k: int) -> list:
+        raise psycopg.OperationalError("connection refused")
+
+    deps = SearchDeps(
+        embed=lambda text: [0.0] * 1024,
+        dense=failing_dense,
+        fts=lambda q, lang, k: [],
+        rerank=lambda q, texts: [],
+    )
+    with _client(deps) as client:
+        response = client.post("/search", json={"q": "frage", "lang": "de"})
+
+    line = _last_stderr_json(capfd)
+    assert line["status"] == 503
+    assert response.headers["X-Request-Id"] == line["request_id"]
+
+
+def test_access_log_records_500_for_unhandled_exception(capfd) -> None:
+    # /article only catches psycopg.Error, so a bare RuntimeError from the
+    # rows() dep is never converted to an HTTPException — it propagates past
+    # ExceptionMiddleware into access_log's `except Exception` branch, which
+    # logs status 500 and re-raises (no X-Request-Id gets set on this path).
+    def exploding_rows(sr: str, article: str, lang: str) -> list:
+        raise RuntimeError("boom")
+
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.article_deps = ArticleDeps(
+        rows=exploding_rows, langs=lambda sr, article: ["de"],
+    )
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/article", params={"sr": "220", "article": "1", "lang": "de"})
+
+    assert response.status_code == 500
+    assert "X-Request-Id" not in response.headers
+    line = _last_stderr_json(capfd)
+    assert line["status"] == 500
+    assert line["path"] == "/article"
+    assert line["method"] == "GET"
 
 
 def test_chat_reuses_lazy_httpx_client_across_requests(monkeypatch) -> None:

@@ -13,6 +13,9 @@ vi.mock("../lib/db", () => ({
   deleteConversation: vi.fn(),
   appendMessage: vi.fn(),
   getMessages: vi.fn(),
+  // lib/audit.ts imports isTauri from here — handleExport's convo.export
+  // logAudit() call would throw calling undefined() without this.
+  isTauri: () => false,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
@@ -136,6 +139,18 @@ describe("SettingsModal", () => {
     expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Corpus" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Export" })).toBeInTheDocument();
+  });
+
+  // Responsiveness fix: without scrollBehavior="inside", HeroUI's Modal has
+  // no max-height, so tall content (the Activity tab) can grow the modal
+  // past the viewport and push its header/tabs off-screen at the 800x600
+  // window floor. scrollBehavior="inside" caps the dialog at
+  // max-h-[calc(100%-8rem)] and scrolls the body instead.
+  it("caps the modal at the viewport height instead of growing past it", () => {
+    renderModal();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("max-h-[calc(100%_-_8rem)]");
   });
 
   it("shows the Corpus tab's panel content (ported CorpusPanel behavior)", async () => {

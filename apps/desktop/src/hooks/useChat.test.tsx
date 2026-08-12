@@ -17,16 +17,21 @@ vi.mock("../lib/db", () => ({
 vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
+vi.mock("../lib/audit", () => ({
+  logAudit: vi.fn(),
+}));
 
 import { postChat } from "../lib/api";
 import { appendMessage, createConversation, getMessages } from "../lib/db";
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import { logAudit } from "../lib/audit";
 
 const postChatMock = vi.mocked(postChat);
 const createConversationMock = vi.mocked(createConversation);
 const appendMessageMock = vi.mocked(appendMessage);
 const getMessagesMock = vi.mocked(getMessages);
 const sendNotificationMock = vi.mocked(sendNotification);
+const logAuditMock = vi.mocked(logAudit);
 
 /** document.hidden is a read-only getter in jsdom — override it per test. */
 function setDocumentHidden(hidden: boolean): void {
@@ -67,8 +72,9 @@ describe("useChat", () => {
     createConversationMock.mockReset();
     appendMessageMock.mockReset();
     getMessagesMock.mockReset();
+    logAuditMock.mockReset();
     createConversationMock.mockResolvedValue(CONVERSATION);
-    appendMessageMock.mockResolvedValue(undefined);
+    appendMessageMock.mockResolvedValue("msg-1");
   });
 
   it("builds the transcript from sources, token and done events", async () => {
@@ -374,7 +380,7 @@ describe("useChat", () => {
         signal.addEventListener("abort", () => reject(new Error("aborted")));
       });
     });
-    appendMessageMock.mockResolvedValueOnce(undefined); // user message
+    appendMessageMock.mockResolvedValueOnce("msg-user"); // user message
     appendMessageMock.mockRejectedValueOnce(new Error("disk full")); // partial assistant save
     const { result } = renderHook(() => useChat());
 
@@ -454,7 +460,7 @@ describe("useChat", () => {
       yield { type: "token", delta: "Partial" } as const;
       throw new Error("connection reset");
     });
-    appendMessageMock.mockResolvedValueOnce(undefined); // user message
+    appendMessageMock.mockResolvedValueOnce("msg-user"); // user message
     appendMessageMock.mockRejectedValueOnce(new Error("disk full")); // partial assistant save
     const { result } = renderHook(() => useChat());
 
@@ -476,7 +482,7 @@ describe("useChat", () => {
   // calls (user + the one failed attempt), never 3.
   it("does not retry a failed clean-completion save from the catch block", async () => {
     postChatMock.mockReturnValue(events([{ type: "token", delta: "Ein Monat" }]));
-    appendMessageMock.mockResolvedValueOnce(undefined); // user message
+    appendMessageMock.mockResolvedValueOnce("msg-user"); // user message
     appendMessageMock.mockRejectedValueOnce(new Error("disk full")); // clean-completion save
     const { result } = renderHook(() => useChat());
 
@@ -487,6 +493,82 @@ describe("useChat", () => {
     expect(appendMessageMock).toHaveBeenCalledTimes(2); // no retried third call
     expect(result.current.banner).toBe("disk full");
   });
+
+  it("logs chat.question and a done chat.answer with duration", async () => {
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE] },
+        { type: "token", delta: "Die Frist " },
+        { type: "token", delta: "beträgt einen Monat [SR 220 Art. 335c]." },
+        { type: "done", citations: [CITATION], model: "m", durationMs: 1 },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("Kündigungsfrist?");
+    });
+
+    expect(logAuditMock).toHaveBeenCalledWith("chat.question", {
+      conversationId: expect.any(String),
+      messageId: expect.any(String),
+    });
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "chat.answer",
+      expect.objectContaining({ model: "m", outcome: "done", refusal: false, citations: 1 }),
+      expect.any(Number),
+    );
+  });
+
+  it("logs a refusal chat.answer when done carries no citations", async () => {
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE, { ...SOURCE, article: "1" }] },
+        { type: "token", delta: "No applicable provision found." },
+        { type: "done", citations: [], model: "m", durationMs: 1 },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("q");
+    });
+
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "chat.answer",
+      expect.objectContaining({ model: "m", outcome: "done", refusal: true, citations: 0 }),
+      expect.any(Number),
+    );
+  });
+
+  // I1 regression: `model` comes from the SSE `done` event only — a turn
+  // that never reaches `done` (stopped by the user) must log `model: null`
+  // rather than an empty answer being mistaken for a known model.
+  it("logs chat.answer with model: null when stopped before the done event arrives", async () => {
+    postChatMock.mockImplementation(async function* (_question: string, signal: AbortSignal) {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.messages.at(-1)?.text).toBe("Partial "));
+    act(() => result.current.stop());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "chat.answer",
+      expect.objectContaining({ model: null, outcome: "stopped" }),
+      expect.any(Number),
+    );
+  });
 });
 
 describe("useChat persistence", () => {
@@ -495,8 +577,9 @@ describe("useChat persistence", () => {
     createConversationMock.mockReset();
     appendMessageMock.mockReset();
     getMessagesMock.mockReset();
+    logAuditMock.mockReset();
     createConversationMock.mockResolvedValue(CONVERSATION);
-    appendMessageMock.mockResolvedValue(undefined);
+    appendMessageMock.mockResolvedValue("msg-1");
   });
 
   it("creates a conversation on the first message, titled from the question", async () => {
@@ -759,8 +842,9 @@ describe("useChat completion notification", () => {
     appendMessageMock.mockReset();
     getMessagesMock.mockReset();
     sendNotificationMock.mockReset();
+    logAuditMock.mockReset();
     createConversationMock.mockResolvedValue(CONVERSATION);
-    appendMessageMock.mockResolvedValue(undefined);
+    appendMessageMock.mockResolvedValue("msg-1");
     localStorage.clear();
   });
 

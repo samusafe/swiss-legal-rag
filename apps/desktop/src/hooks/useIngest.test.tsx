@@ -9,13 +9,18 @@ vi.mock("../lib/api", () => ({
   postIngestStop: vi.fn(),
   streamIngestProgress: vi.fn(),
 }));
+vi.mock("../lib/audit", () => ({
+  logAudit: vi.fn(),
+}));
 
 import { getIngestStatus, postIngest, postIngestStop, streamIngestProgress } from "../lib/api";
+import { logAudit } from "../lib/audit";
 
 const getStatusMock = vi.mocked(getIngestStatus);
 const postIngestMock = vi.mocked(postIngest);
 const postIngestStopMock = vi.mocked(postIngestStop);
 const streamMock = vi.mocked(streamIngestProgress);
+const logAuditMock = vi.mocked(logAudit);
 
 const IDLE: IngestStatus = {
   running: false,
@@ -36,6 +41,7 @@ describe("useIngest", () => {
     postIngestStopMock.mockReset();
     streamMock.mockReset();
     getStatusMock.mockResolvedValue(IDLE);
+    logAuditMock.mockReset();
     // A factory (not a shared instance): every call — including the
     // automatic mount-time watch() — gets its own fresh generator, since
     // async generators can't be replayed once drained.
@@ -203,5 +209,92 @@ describe("useIngest", () => {
     });
 
     expect(result.current.error).toBe("no ingest run is active");
+  });
+});
+
+// C1 regression: the mount-time watch() reattach must not manufacture
+// ingest.finish/ingest.error audit rows for a run this session never
+// started — /ingest/progress emits exactly one progress snapshot even when
+// idle, immediately followed by the terminal event.
+describe("useIngest ingest.finish/ingest.error audit logging (C1)", () => {
+  beforeEach(() => {
+    getStatusMock.mockReset();
+    postIngestMock.mockReset();
+    postIngestStopMock.mockReset();
+    streamMock.mockReset();
+    logAuditMock.mockReset();
+    getStatusMock.mockResolvedValue(IDLE);
+  });
+
+  it("does not log ingest.finish when the mount-time reattach observes an idle stream ending in done", async () => {
+    streamMock.mockImplementation(() =>
+      events([
+        { type: "progress", phase: "embed", done: 12930, total: 12930 },
+        { type: "done", chunksEmbedded: 12930 },
+      ]),
+    );
+
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    // Arity-insensitive on purpose: toHaveBeenCalledWith("ingest.finish",
+    // expect.anything()) is vacuous against the 3-arg pre-fix call.
+    expect(logAuditMock.mock.calls.map((c) => c[0])).not.toContain("ingest.finish");
+  });
+
+  it("does not log ingest.error when the mount-time reattach observes a stale error terminal event", async () => {
+    streamMock.mockImplementation(() =>
+      events([
+        { type: "progress", phase: "embed", done: 0, total: 0 },
+        { type: "error", detail: "stale failure from a previous run" },
+      ]),
+    );
+
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    expect(logAuditMock).not.toHaveBeenCalledWith("ingest.error", expect.anything());
+  });
+
+  it("still logs ingest.finish for a run this session actually started", async () => {
+    postIngestMock.mockResolvedValue(undefined);
+    streamMock.mockImplementation(() =>
+      events([
+        { type: "progress", phase: "embed", done: 5, total: 10 },
+        { type: "done", chunksEmbedded: 10 },
+      ]),
+    );
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "ingest.finish",
+      { chunks: 10 },
+      expect.any(Number),
+    );
+  });
+
+  it("still logs ingest.error for a run this session actually started", async () => {
+    postIngestMock.mockResolvedValue(undefined);
+    streamMock.mockImplementation(() =>
+      events([
+        { type: "progress", phase: "fetch", done: 1, total: 3 },
+        { type: "error", detail: "`ingest fetch` failed (exit 1): BOOM" },
+      ]),
+    );
+    const { result } = renderHook(() => useIngest());
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(logAuditMock).toHaveBeenCalledWith("ingest.error", {
+      message: "`ingest fetch` failed (exit 1): BOOM",
+    });
   });
 });

@@ -21,6 +21,7 @@ import { useShortcuts } from "./hooks/useShortcuts";
 import { useTheme } from "./hooks/useTheme";
 import { dedupe, toArticleRef } from "./lib/sources";
 import { prefs } from "./lib/prefs";
+import { logAudit } from "./lib/audit";
 
 type Panels = { left: boolean; right: boolean };
 const DEFAULT_PANELS: Panels = { left: true, right: true };
@@ -119,6 +120,8 @@ export default function App() {
   } | null>(null);
 
   const handleOpenSource = useCallback((list: Source[], index: number) => {
+    const opened = toArticleRef(list[index]);
+    logAudit("article.open", { ...opened, origin: "card" });
     setArticleTarget({ refs: list.map(toArticleRef), index });
   }, []);
 
@@ -130,6 +133,8 @@ export default function App() {
         s.article.toLowerCase() === citation.article.toLowerCase(),
     );
     if (index === -1) return; // resolved citations always match, but stay safe
+    const opened = toArticleRef(list[index]);
+    logAudit("article.open", { ...opened, origin: "chip" });
     setArticleTarget({ refs: list.map(toArticleRef), index });
   }, []);
 
@@ -151,6 +156,13 @@ export default function App() {
         }
         if (i === index) targetIndex = slot;
       }
+      const opened = results[index];
+      logAudit("article.open", {
+        sr: opened.sr,
+        article: opened.article,
+        lang: searchLang,
+        origin: "palette",
+      });
       setArticleTarget({ refs, index: targetIndex });
     },
     [lang],

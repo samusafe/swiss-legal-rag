@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getIngestStatus, postIngest, postIngestStop, streamIngestProgress } from "../lib/api";
 import type { IngestStatus } from "../lib/api";
+import { logAudit } from "../lib/audit";
 
 export interface IngestProgress {
   phase: string;
@@ -13,6 +14,7 @@ export function useIngest() {
   const [progress, setProgress] = useState<IngestProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const startRef = useRef<number | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -33,12 +35,37 @@ export function useIngest() {
           case "progress":
             setProgress({ phase: event.phase, done: event.done, total: event.total });
             break;
-          case "done":
+          case "done": {
             setProgress(null);
+            // Only log ingest.finish when THIS session actually started the
+            // run (startRef.current is set by start(), cleared here and on
+            // "error"). We deliberately do NOT treat "a progress event
+            // arrived on this stream" as sufficient: /ingest/progress emits
+            // exactly one progress snapshot even when idle, immediately
+            // followed by this terminal event (see app.py's events() loop),
+            // so every mount-time reattach — including one that observed
+            // nothing running — would still pass a "saw a progress event"
+            // check. startRef.current is the only signal that reliably
+            // distinguishes "this session started a real run" from "we just
+            // reattached to an idle/already-finished stream" (C1).
+            if (startRef.current !== null) {
+              const elapsed = Math.round(performance.now() - startRef.current);
+              logAudit("ingest.finish", { chunks: event.chunksEmbedded }, elapsed);
+            }
+            startRef.current = null;
             break;
+          }
           case "error":
             setError(event.detail);
             setProgress(null);
+            // Same guard as "done" above — otherwise a stale state.error on
+            // the backend (cleared only by the next start_ingest call) would
+            // re-log an identical ingest.error on every reattach for the
+            // rest of the API process's life.
+            if (startRef.current !== null) {
+              logAudit("ingest.error", { message: event.detail });
+            }
+            startRef.current = null;
             break;
         }
       }
@@ -63,6 +90,8 @@ export function useIngest() {
     setError(null);
     try {
       await postIngest();
+      startRef.current = performance.now();
+      logAudit("ingest.start", {});
       await watch();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

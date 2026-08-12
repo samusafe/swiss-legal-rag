@@ -53,6 +53,10 @@ vi.mock("./lib/db", () => ({
   deleteConversation: vi.fn(),
   appendMessage: vi.fn(),
   getMessages: vi.fn(),
+  // lib/audit.ts imports isTauri from here — without it, logAudit() (now
+  // wired into App/SearchPalette/ArticleDocModal/SettingsModal) throws
+  // calling undefined() and the failure surfaces as an unrelated UI error.
+  isTauri: () => false,
 }));
 
 import { fetchArticle, search } from "./lib/api";

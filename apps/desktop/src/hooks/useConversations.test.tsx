@@ -10,6 +10,9 @@ vi.mock("../lib/db", () => ({
   deleteConversation: vi.fn(),
   appendMessage: vi.fn(),
   getMessages: vi.fn(),
+  // lib/audit.ts imports isTauri from here — rename()/remove() now call
+  // logAudit(), which would throw calling undefined() without this.
+  isTauri: () => false,
 }));
 
 import {

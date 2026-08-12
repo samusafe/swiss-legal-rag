@@ -65,6 +65,19 @@ The reranker (`RERANKER_MODEL`, `BAAI/bge-reranker-v2-m3` by default) downloads 
 Hugging Face on first use — a one-time network call the first time `/search` or `/chat` runs
 against a fresh install; after that, everything is local and offline.
 
+## Access log
+
+Every request (except `GET /health`, polled continuously by the desktop app) emits one JSON line
+to stderr: `{"ts", "request_id", "method", "path", "status", "duration_ms"}`. `duration_ms`
+measures time to the start of the response — the middleware wraps `call_next`, which returns as
+soon as the response headers are ready, not once the body is fully sent. For the streaming
+endpoints (`/chat`, `/ingest/progress`) the body streams *after* that point, so `duration_ms`
+excludes generation time for `/chat` and excludes the run's actual duration for
+`/ingest/progress` entirely. The same `request_id` is also returned as the `X-Request-Id`
+response header (and exposed to cross-origin callers via `Access-Control-Expose-Headers`), so a
+client-reported issue can be correlated with its server-side log line. Emission never fails the
+request it describes — a logging error is swallowed rather than surfacing to the caller.
+
 ## Reproducibility
 
 - **Dependencies** are exact-pinned in `pyproject.toml` (`==`), captured from a known-good

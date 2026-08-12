@@ -3,6 +3,7 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import { search } from "../lib/api";
 import type { SearchResult } from "../lib/api";
 import { t, toSearchLang, useLang } from "../i18n";
+import { logAudit } from "../lib/audit";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_K = 8;
@@ -104,11 +105,17 @@ export function SearchPalette({ isOpen, onClose, onSelect }: SearchPaletteProps)
     const timer = setTimeout(() => {
       setSearching(true);
       setSearchError(false);
+      const searchStart = performance.now();
       search(trimmedQuery, SEARCH_K, toSearchLang(lang), controller.signal)
         .then((found) => {
           setResults(found);
           setSearching(false);
           setSelectedIndex(found.length > 0 ? 0 : null);
+          logAudit(
+            "search.query",
+            { query: trimmedQuery, lang: toSearchLang(lang), results: found.length },
+            Math.round(performance.now() - searchStart),
+          );
         })
         .catch(() => {
           if (controller.signal.aborted) return;

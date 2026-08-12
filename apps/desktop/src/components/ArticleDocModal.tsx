@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { ApiError, fetchArticle } from "../lib/api";
 import type { Article, SearchLang } from "../lib/api";
 import { openExternal } from "../lib/open";
+import { logAudit } from "../lib/audit";
 import { t } from "../i18n";
 
 export interface ArticleRef {
@@ -182,7 +183,15 @@ export function ArticleDocModal({
                 size="sm"
                 selectedKey={shownLang}
                 disabledKeys={disabledLangs}
-                onSelectionChange={(key) => setLangTab(key as SearchLang)}
+                onSelectionChange={(key) => {
+                  logAudit("article.langSwitch", {
+                    sr: ref.sr,
+                    article: ref.article,
+                    from: shownLang,
+                    to: key as SearchLang,
+                  });
+                  setLangTab(key as SearchLang);
+                }}
                 aria-label="Language"
               >
                 {CORPUS_LANGS.map((lang) => (
@@ -233,7 +242,10 @@ export function ArticleDocModal({
                 color="primary"
                 isDisabled={article === null}
                 onPress={() => {
-                  if (article !== null) openExternal(article.eli);
+                  if (article !== null) {
+                    logAudit("article.fedlex", { sr: article.sr, article: article.article });
+                    openExternal(article.eli);
+                  }
                 }}
               >
                 {t("article.fedlex")}

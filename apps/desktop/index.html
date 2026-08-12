@@ -17,6 +17,17 @@
           background-color: #141414;
         }
       }
+      /* Once the theme class lands (blocking script below, then useTheme at
+         runtime), it must win over the OS media query — otherwise an app
+         theme that differs from the OS theme leaves html the wrong color,
+         visible as a 1px sliver at the window edges under fractional
+         Windows display scaling. */
+      html.light {
+        background-color: #fafafa;
+      }
+      html.dark {
+        background-color: #141414;
+      }
     </style>
     <script>
       (function () {

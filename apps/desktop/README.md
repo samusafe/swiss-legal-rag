@@ -79,11 +79,12 @@ In the chat transcript, each `[SR <nr> Art. <x>]` citation renders as a clickabl
 - The composer is disabled until `/health` responds successfully.
 - A chat shows sources first, accumulates optional `thinking` events separately, then streams answer tokens. Reasoning is never used for citation extraction. The expandable reasoning view is a debug feature, off by default (`VITE_SHOW_THINKING`) — raw model reasoning can be unpredictable and is not intended for end users. With the flag off, the transcript still shows a static "Searching articles…" / "Thinking…" indicator; the flag only gates the expandable disclosure of the reasoning text itself.
 - A mid-stream error preserves the partial answer; Stop aborts the request and marks the partial answer as stopped. Either way, the partial answer is saved to the conversation's history, not just kept on screen.
-- The header gear (or `Ctrl+,`) opens Settings — General (UI language, native OS notifications), Corpus, and Export tabs.
+- The header gear (or `Ctrl+,`) opens Settings — General (UI language, native OS notifications), Corpus, Export, and Activity tabs.
 - The Corpus tab starts the server-side `resolve -> fetch -> parse -> embed` pipeline and displays live progress. Progress is tracked by a persistent app-level subscription to the server's progress stream that stays attached for the whole session, so closing and reopening the panel does not lose or restart it. Closing the panel does not cancel ingestion; a Stop button (with a confirm popover) cancels the current phase server-side.
 - Updating the corpus only re-embeds new or changed articles — expect a long CPU-bound job on first ingest, but reruns are incremental (see `apps/ingestion/README.md`).
 - With OS notifications enabled (Settings > General; on by default, permission requested on enable), finishing an answer while the window is in the background shows a native notification with the answer's first line.
 - The Export tab saves any conversation as JSON or Markdown via the native save dialog.
+- The Activity tab shows a local audit trail of chat, search, reading, conversation-management, and error events, stored in the same local SQLite database as conversation history. It shows a per-group 7-/30-day event count summary, filters by group and by a 7/30/90-day range, paginates the results, and exports the full log as JSONL via the native save dialog. Events older than 90 days are pruned automatically on startup.
 - Sources are scoped to the latest selected answer, show relevance as a percentage, and open the article reader on click.
 
 ## Icon

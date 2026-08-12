@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "./api";
 import { getHealth, postChat } from "./api";
 
+vi.mock("./audit", () => ({
+  logAudit: vi.fn(),
+}));
+
+import { logAudit } from "./audit";
+
+const logAuditMock = vi.mocked(logAudit);
+
 function sseResponse(text: string): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -25,6 +33,7 @@ async function collect(question = "q"): Promise<ChatEvent[]> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  logAuditMock.mockReset();
 });
 
 describe("postChat", () => {
@@ -161,6 +170,44 @@ describe("search", () => {
     );
 
     await expect(search("q", 8, "de")).rejects.toThrow("boom");
+  });
+
+  it("rejects with an ApiError and logs error.api on a 503 failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: "database unavailable" }), { status: 503 }),
+      ),
+    );
+
+    await expect(search("q", 5, "de")).rejects.toMatchObject({ status: 503 });
+    expect(logAuditMock).toHaveBeenCalledWith("error.api", {
+      endpoint: "/search",
+      status: 503,
+      message: expect.any(String),
+      requestId: null,
+    });
+  });
+
+  // I3: closes the X-Request-Id correlation loop — the header is captured
+  // from the failing response and threaded into the error.api detail so it
+  // can be matched against the backend's access-log line.
+  it("captures the X-Request-Id response header into error.api's requestId", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: "database unavailable" }), {
+          status: 503,
+          headers: { "X-Request-Id": "b3f1a2c4-0000-4000-8000-000000000000" },
+        }),
+      ),
+    );
+
+    await expect(search("q", 5, "de")).rejects.toMatchObject({ status: 503 });
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "error.api",
+      expect.objectContaining({ requestId: "b3f1a2c4-0000-4000-8000-000000000000" }),
+    );
   });
 });
 

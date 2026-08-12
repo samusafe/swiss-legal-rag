@@ -1,8 +1,11 @@
 import json
+import sys
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -59,6 +62,27 @@ def _db_host(database_url: str) -> str:
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _emit_access_line(
+    request: Request, request_id: str, status: int, start: float
+) -> None:
+    # Emission must never fail the request it describes — swallow and move on.
+    try:
+        line = json.dumps(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "duration_ms": round((time.perf_counter() - start) * 1000),
+            },
+            ensure_ascii=False,
+        )
+        print(line, file=sys.stderr, flush=True)
+    except Exception as error:  # noqa: BLE001 — deliberate fail-soft boundary
+        print(f"access-log emission failed: {error}", file=sys.stderr)
 
 
 def _connect_deps(app: FastAPI) -> None:
@@ -134,6 +158,26 @@ def create_app() -> FastAPI:
                 return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
         return await call_next(request)
 
+    # Structured access log — the single request-level record (the desktop
+    # app's audit trail deliberately stores no api.request events; see the
+    # audit spec's no-duplication rule). Registered after enforce_security
+    # so it wraps it and logs the 401/429 responses it produces; CORS is
+    # added later and stays outermost.
+    @app.middleware("http")
+    async def access_log(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if request.url.path == "/health":  # polled by the desktop app — noise
+            return await call_next(request)
+        request_id = str(uuid.uuid4())
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            _emit_access_line(request, request_id, 500, start)
+            raise
+        response.headers["X-Request-Id"] = request_id
+        _emit_access_line(request, request_id, response.status_code, start)
+        return response
+
     # Registered after enforce_security so CORS ends up OUTERMOST: Starlette's
     # add_middleware() prepends to the stack, so whichever middleware is added
     # last wraps everything added before it. With CORS outermost, its own
@@ -151,6 +195,12 @@ def create_app() -> FastAPI:
         ],
         allow_methods=["*"],
         allow_headers=["*"],
+        # Starlette's default is to expose no custom response headers to
+        # cross-origin JS — without this, X-Request-Id is set on the wire but
+        # response.headers.get("X-Request-Id") reads null in the desktop
+        # webview, breaking the error.api <-> access-log correlation the
+        # header exists for.
+        expose_headers=["X-Request-Id"],
     )
 
     @app.post("/search")

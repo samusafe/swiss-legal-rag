@@ -21,6 +21,8 @@ import type { Lang } from "../i18n";
 import type { Conversation, StoredMessage } from "../lib/db";
 import { toJson, toMarkdown } from "../lib/exporter";
 import { prefs } from "../lib/prefs";
+import { logAudit } from "../lib/audit";
+import { ActivityPanel } from "./ActivityPanel";
 import { CorpusPanel } from "./CorpusPanel";
 
 export type ExportFormat = "json" | "markdown";
@@ -144,7 +146,10 @@ function ExportTab() {
     try {
       const messages = await conversations.getMessages(selectedId);
       const outcome = await exportConversation(conversation, messages, format);
-      if (outcome.status === "written") setDone(true);
+      if (outcome.status === "written") {
+        setDone(true);
+        logAudit("convo.export", { conversationId: selectedId, format });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -187,7 +192,12 @@ export function SettingsModal({
   ingest: ReturnType<typeof useIngest>;
 }) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+    // scrollBehavior="inside" caps the modal at viewport height (HeroUI's
+    // `inside` variant adds max-h-[calc(100%-8rem)] to the modal and
+    // overflow-y-auto to ModalBody) so the header/tabs always stay visible
+    // and only the body scrolls — required at the 800x600 window floor,
+    // where the Activity tab's content is taller than the viewport.
+    <Modal isOpen={isOpen} onClose={onClose} size="lg" scrollBehavior="inside">
       <ModalContent>
         <ModalHeader>{t("settings.title")}</ModalHeader>
         <ModalBody className="pb-6">
@@ -200,6 +210,9 @@ export function SettingsModal({
             </Tab>
             <Tab key="export" title={t("settings.export")}>
               <ExportTab />
+            </Tab>
+            <Tab key="activity" title={t("settings.activity")}>
+              <ActivityPanel />
             </Tab>
           </Tabs>
         </ModalBody>

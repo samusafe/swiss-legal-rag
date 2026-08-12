@@ -83,3 +83,46 @@ def test_dense_and_fts_search() -> None:
             cur.execute("DELETE FROM chunks WHERE eli IN (%s, %s, %s)", ("https://test.eli/1", "https://test.eli/2", "https://test.eli/3"))
             conn.commit()
         conn.close()
+
+
+@pytest.mark.db
+@pytest.mark.skipif(_try_connect() is None, reason="local Postgres not reachable")
+def test_article_rows_and_langs() -> None:
+    from retrieval.config import Settings
+    from retrieval.db import article_langs, article_rows, connect
+
+    settings = Settings.from_env()
+    conn = connect(settings)
+    try:
+        # Two parts in "de", one part in "fr" — exercises both part ordering
+        # and cross-language availability in a single article.
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO chunks (sr, lang, article, part, eid, heading, context, text, eli, act_name, abbrev, version_date)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                , (
+                    "220", "de", "335x", 2, "art_335_x", "Probezeit", None, "syntheticmarker part two", "https://test.eli/4", "Test Act", "TA", date(2026, 1, 1),
+                    "220", "de", "335x", 1, "art_335_x", "Probezeit", None, "syntheticmarker part one", "https://test.eli/5", "Test Act", "TA", date(2026, 1, 1),
+                    "220", "fr", "335x", 1, "art_335_x", "Periode d'essai", None, "syntheticmarker partie une", "https://test.eli/6", "Test Act", "TA", date(2026, 1, 1),
+                )
+            )
+            conn.commit()
+
+        rows = article_rows(conn, "220", "335x", "de")
+        assert [r.text for r in rows] == ["syntheticmarker part one", "syntheticmarker part two"]
+
+        langs = article_langs(conn, "220", "335x")
+        assert langs == ["de", "fr"]
+    finally:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM chunks WHERE eli IN (%s, %s, %s)",
+                ("https://test.eli/4", "https://test.eli/5", "https://test.eli/6"),
+            )
+            conn.commit()
+        conn.close()

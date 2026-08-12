@@ -1,18 +1,20 @@
 import json
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
 import psycopg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from retrieval.citations import extract_citations
 from retrieval.config import Settings
-from retrieval.db import connect, dense_search, fts_search
+from retrieval.db import ChunkRow, article_langs, article_rows, connect, dense_search, fts_search
 from retrieval.embeddings import embed_query
 from retrieval.generation import REFUSAL_SENTENCE, build_messages, stream_chat
 from retrieval.ingest import (
@@ -30,7 +32,7 @@ from retrieval.language import (
     detect_language,
     fts_language,
 )
-from retrieval.models import ChatRequest, SearchRequest, SearchResponse
+from retrieval.models import ArticleResponse, ChatRequest, SearchRequest, SearchResponse
 from retrieval.readiness import check_corpus, check_ollama, check_postgres
 from retrieval.rerank import Reranker
 from retrieval.search import SearchDeps, run_search
@@ -41,6 +43,12 @@ from retrieval.security import RateLimiter, verify_api_key
 # endpoints below — GET status/progress/health/ready are never throttled.
 _OPEN_PATHS = {"/health", "/ready"}
 _RATE_LIMITED_PATHS = {"/search", "/chat", "/ingest", "/ingest/stop"}
+
+
+@dataclass
+class ArticleDeps:
+    rows: Callable[[str, str, str], list[ChunkRow]]
+    langs: Callable[[str, str], list[str]]
 
 
 def _db_host(database_url: str) -> str:
@@ -69,6 +77,10 @@ def _connect_deps(app: FastAPI) -> None:
         fts=lambda q, lang, k: fts_search(conn, q, lang, k),
         rerank=reranker.scores,
     )
+    app.state.article_deps = ArticleDeps(
+        rows=lambda sr, article, lang: article_rows(conn, sr, article, lang),
+        langs=lambda sr, article: article_langs(conn, sr, article),
+    )
 
 
 def _drop_deps(app: FastAPI) -> None:
@@ -79,6 +91,7 @@ def _drop_deps(app: FastAPI) -> None:
         app.state.conn.close()
         app.state.conn = None
     app.state.deps = None
+    app.state.article_deps = None
 
 
 def _close_client(app: FastAPI) -> None:
@@ -99,6 +112,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="swiss-legal-rag retrieval", lifespan=lifespan)
     app.state.deps = None
+    app.state.article_deps = None
     app.state.conn = None
     app.state.client = None
     app.state.ingest = IngestState()
@@ -156,6 +170,50 @@ def create_app() -> FastAPI:
                     f"database unavailable at {host} — is `docker compose up -d` running?"
                 ),
             ) from error
+
+    @app.get("/article")
+    def get_article(
+        sr: str = Query(min_length=1),
+        article: str = Query(min_length=1),
+        lang: Literal["de", "fr", "it"] = Query(),
+    ) -> ArticleResponse:
+        try:
+            if app.state.article_deps is None:  # dropped after a DB failure
+                _connect_deps(app)
+            rows = app.state.article_deps.rows(sr, article, lang)
+            langs = app.state.article_deps.langs(sr, article)
+        except psycopg.Error as error:
+            _drop_deps(app)
+            host = _db_host(app.state.settings.database_url)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"database unavailable at {host} — is `docker compose up -d` running?"
+                ),
+            ) from error
+        if not rows:
+            if langs:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"SR {sr} Art. {article} not available in '{lang}' "
+                        f"(available: {', '.join(langs)})"
+                    ),
+                )
+            raise HTTPException(status_code=404, detail=f"SR {sr} Art. {article} not found")
+        first = rows[0]
+        return ArticleResponse(
+            sr=first.sr,
+            article=first.article,
+            lang=first.lang,
+            heading=first.heading,
+            act_name=first.act_name,
+            abbrev=first.abbrev,
+            eli=first.eli,
+            version_date=first.version_date,
+            texts=[row.text for row in rows],
+            available_langs=langs,
+        )
 
     _SOURCE_FIELDS = {"sr", "article", "heading", "eli", "lang", "score"}
     # Exact wording is part of the citation contract: the M6 evals refusal metric

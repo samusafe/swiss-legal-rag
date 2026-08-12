@@ -141,7 +141,7 @@ Response:
       "act_name": "Code of Obligations",
       "abbrev": "OR / CO",
       "version_date": "2026-01-01",
-      "score": 6.87
+      "score": 0.87
     }
   ],
   "took_ms": { "embed": 12, "search": 8, "rerank": 340 }
@@ -151,6 +151,43 @@ Response:
 Every result carries its official ELI link and SR/article citation (`[SR 220 Art. 335c]`), matching the citation contract used by `/chat`.
 
 If Ollama is unreachable, `/search` returns `503` with an actionable message naming the endpoint it tried to reach.
+
+### `GET /article`
+
+Fetches one full article by citation key and language — used by the desktop app's article reader (opened from citation chips, source cards, and the search palette) to show the complete text behind a chunked search/chat result.
+
+Query parameters:
+
+- `sr` — the act's SR number (e.g. `220`).
+- `article` — the article number (e.g. `335c`).
+- `lang` — one of `de`, `fr`, `it`.
+
+```
+curl -s "http://localhost:8000/article?sr=220&article=335c&lang=de"
+```
+
+Response (`ArticleResponse`):
+
+```json
+{
+  "sr": "220",
+  "article": "335c",
+  "lang": "de",
+  "heading": "nach Ablauf der Probezeit",
+  "act_name": "Code of Obligations",
+  "abbrev": "OR / CO",
+  "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
+  "version_date": "2026-01-01",
+  "texts": ["Art. 335c\n1 Das Arbeitsverhältnis kann..."],
+  "available_langs": ["de", "fr", "it"]
+}
+```
+
+`texts` holds one string per stored paragraph/chunk of the article, in order, so the client can render the full article rather than a single retrieved chunk.
+
+If the article doesn't exist in the requested `lang` but exists in another corpus language, the response is `404` naming the languages it is available in: `{"detail": "SR 220 Art. 335c not available in 'it' (available: de, fr)"}`. If it doesn't exist at all, `404 {"detail": "SR 220 Art. 335c not found"}`.
+
+Subject to the same `X-API-Key` requirement as `/search` and `/chat` when `API_KEY` is set (see Security below); being a `GET`, it is never subject to `RATE_LIMIT_PER_MINUTE`, which only throttles `POST` endpoints.
 
 ### `POST /chat`
 
@@ -198,7 +235,7 @@ Example stream (abridged):
 
 ```
 event: sources
-data: {"sources": [{"sr": "220", "article": "335c", "heading": "nach Ablauf der Probezeit", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "lang": "de", "score": 6.87}]}
+data: {"sources": [{"sr": "220", "article": "335c", "heading": "nach Ablauf der Probezeit", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c", "lang": "de", "score": 0.87}]}
 
 event: thinking
 data: {"delta": "The user is asking about the notice period in the first year..."}

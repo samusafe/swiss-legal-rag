@@ -66,9 +66,13 @@ The database file, `conversations.db`, lives in the OS-standard per-app configur
 | macOS | `~/Library/Application Support/com.samusafe.swiss-legal-rag/conversations.db` |
 | Linux | `~/.config/com.samusafe.swiss-legal-rag/conversations.db` |
 
-### Corpus search and article preview
+### Corpus search and the article reader
 
-A Spotlight-style search palette, opened from the header trigger or `Ctrl+K`, calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Because retrieval runs on CPU-only hardware, a search can take anywhere from a few seconds to about a minute; the palette shows a persistent spinner and status label for the whole wait rather than appearing to hang. Results are navigable with the arrow keys and select with Enter or a click. Selecting a result — or clicking a citation chip in the chat transcript — opens an article preview showing the matched chunk text, with a "View on Fedlex" button that opens the official article page in the system browser.
+A Spotlight-style search palette, opened from the header trigger or `Ctrl+K`, calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Because retrieval runs on CPU-only hardware, a search can take anywhere from a few seconds to about a minute; the palette shows a persistent spinner and status label for the whole wait rather than appearing to hang. Results are navigable with the arrow keys and select with Enter or a click.
+
+Selecting a palette result, clicking a citation chip in the chat transcript, or clicking a source card opens the same article reader modal, backed by `GET /article`. It shows the complete article text (not just the retrieved chunk) with DE/FR/IT tabs to switch language on the spot, `←`/`→` navigation across the set of articles it was opened with (every citation in an answer, or the palette's result list), and an "Open in Fedlex" button that opens the official article page in the system browser, anchored to that specific article for the vast majority of entries (a handful of ambiguous anchors fall back to the act's page instead of a wrong one). A language tab for a translation the corpus doesn't have is disabled rather than hidden.
+
+In the chat transcript, each `[SR <nr> Art. <x>]` citation renders as a clickable chip; an answer that cites several articles in one bracket (e.g. `[SR 220 Art. 1, Art. 2]`) renders one chip per reference, each independently opening the reader on that article. Answers that cite nothing (including refusals) show no sources panel entries.
 
 ## Behavior
 
@@ -80,7 +84,7 @@ A Spotlight-style search palette, opened from the header trigger or `Ctrl+K`, ca
 - Updating the corpus only re-embeds new or changed articles — expect a long CPU-bound job on first ingest, but reruns are incremental (see `apps/ingestion/README.md`).
 - With OS notifications enabled (Settings > General; on by default, permission requested on enable), finishing an answer while the window is in the background shows a native notification with the answer's first line.
 - The Export tab saves any conversation as JSON or Markdown via the native save dialog.
-- Sources are scoped to the latest selected answer and open their official Fedlex ELI links in the system browser.
+- Sources are scoped to the latest selected answer, show relevance as a percentage, and open the article reader on click.
 
 ## Icon
 

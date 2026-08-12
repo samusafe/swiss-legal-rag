@@ -74,3 +74,46 @@ def test_citation_falls_back_to_best_scored_when_answer_lang_unknown() -> None:
     high = _source("220", "1", lang="fr", score=0.7)
     citations = extract_citations("[SR 220 Art. 1]", [low, high])
     assert citations[0].eli == high.eli
+
+
+def test_multi_ref_bracket_yields_one_citation_per_ref() -> None:
+    sources = [
+        _source(sr="822.11", article="9", lang="fr", score=0.9),
+        _source(sr="822.11", article="12", lang="fr", score=0.8),
+    ]
+    answer = "Max 45 hours [SR 822.11 Art. 9, SR 822.11 Art. 12]."
+    citations = extract_citations(answer, sources, "fr")
+    assert [c.label for c in citations] == ["SR 822.11 Art. 9", "SR 822.11 Art. 12"]
+    assert all(c.raw == "[SR 822.11 Art. 9, SR 822.11 Art. 12]" for c in citations)
+    assert all(c.resolved for c in citations)
+
+
+def test_multi_ref_bracket_mixed_resolution() -> None:
+    sources = [_source(sr="822.11", article="9", lang="fr", score=0.9)]
+    answer = "See [SR 822.11 Art. 9, SR 999 Art. 1]."
+    citations = extract_citations(answer, sources, "fr")
+    assert citations[0].resolved and citations[0].eli is not None
+    assert not citations[1].resolved and citations[1].eli is None
+
+
+def test_single_ref_bracket_unchanged() -> None:
+    sources = [_source(sr="220", article="335b", lang="fr", score=0.9)]
+    citations = extract_citations("See [SR 220 Art. 335b].", sources, "fr")
+    assert len(citations) == 1
+    assert citations[0].raw == "[SR 220 Art. 335b]"
+    assert citations[0].label == "SR 220 Art. 335b"
+
+
+def test_bracket_without_sr_reference_ignored() -> None:
+    assert extract_citations("A note [see above] here.", [], None) == []
+
+
+def test_repeated_bracket_deduplicated() -> None:
+    answer = "[SR 220 Art. 1] and again [SR 220 Art. 1]."
+    citations = extract_citations(answer, [], None)
+    assert len(citations) == 1
+
+
+def test_duplicate_ref_within_bracket_deduplicated() -> None:
+    citations = extract_citations("[SR 220 Art. 1, SR 220 Art. 1]", [], None)
+    assert len(citations) == 1

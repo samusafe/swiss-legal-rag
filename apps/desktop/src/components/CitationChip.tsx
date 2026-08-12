@@ -1,8 +1,13 @@
 import { Button, Chip } from "@heroui/react";
 import type { Citation } from "../lib/api";
-import { ArticlePreview } from "./ArticlePreview";
 
-export function CitationChip({ citation }: { citation: Citation }) {
+export function CitationChip({
+  citation,
+  onOpen,
+}: {
+  citation: Citation;
+  onOpen?: (citation: Citation) => void;
+}) {
   if (!citation.resolved || citation.eli === null) {
     return (
       <Chip
@@ -10,24 +15,21 @@ export function CitationChip({ citation }: { citation: Citation }) {
         variant="flat"
         className="mx-0.5 rounded-sm bg-foreground align-baseline text-background"
       >
-        {citation.raw}
+        {citation.label}
       </Chip>
     );
   }
   return (
-    <ArticlePreview
-      srNumber={citation.sr}
-      article={citation.article}
-      trigger={
-        <Button
-          size="sm"
-          variant="flat"
-          className="mx-0.5 h-6 min-w-0 rounded-sm bg-foreground px-2 align-baseline text-background"
-          onClick={(event) => event.stopPropagation()}
-        >
-          {citation.raw}
-        </Button>
-      }
-    />
+    <Button
+      size="sm"
+      variant="flat"
+      className="mx-0.5 h-6 min-w-0 rounded-sm bg-foreground px-2 align-baseline text-background"
+      onClick={(event) => {
+        event.stopPropagation(); // the bubble itself is clickable (answer selection)
+        onOpen?.(citation);
+      }}
+    >
+      {citation.label}
+    </Button>
   );
 }

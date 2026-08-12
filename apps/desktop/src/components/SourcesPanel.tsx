@@ -1,21 +1,9 @@
 import { Button, Chip, Progress, Skeleton } from "@heroui/react";
 import { t } from "../i18n";
 import type { Citation, Source } from "../lib/api";
-import { openExternal } from "../lib/open";
+import { dedupe } from "../lib/sources";
 
-// Oversized articles are split into parts sharing (sr, article, lang);
-// show one card per article, keeping the best-scored part.
-function dedupe(sources: Source[]): Source[] {
-  const byKey = new Map<string, Source>();
-  for (const source of sources) {
-    const key = `${source.sr}-${source.article}-${source.lang}`;
-    const existing = byKey.get(key);
-    if (existing === undefined || source.score > existing.score) byKey.set(key, source);
-  }
-  return [...byKey.values()].sort((a, b) => b.score - a.score);
-}
-
-// Rerank scores are unbounded logits — the bar is relative to this result set.
+// Scores are sigmoid outputs in [0, 1]; the bar is relative to this result set.
 function relativePercent(score: number, scores: number[]): number {
   const max = Math.max(...scores);
   const min = Math.min(...scores);
@@ -23,17 +11,24 @@ function relativePercent(score: number, scores: number[]): number {
   return Math.round((100 * (score - min)) / (max - min));
 }
 
+// Rerank scores are sigmoid outputs in [0, 1]; clamp defensively.
+function percent(score: number): number {
+  return Math.round(Math.max(0, Math.min(1, score)) * 100);
+}
+
 export function SourcesPanel({
   sources,
   streaming,
   citations,
   subtitle,
+  onOpenArticle,
   onCollapse,
 }: {
   sources: Source[];
   streaming: boolean;
   citations: Citation[];
   subtitle: string;
+  onOpenArticle: (sources: Source[], index: number) => void;
   onCollapse?: () => void;
 }) {
   const deduped = dedupe(sources);
@@ -101,7 +96,7 @@ export function SourcesPanel({
           </p>
         </div>
       )}
-      {deduped.map((source) => {
+      {deduped.map((source, i) => {
         // `resolved` is deliberately not checked: an unresolved citation can't match
         // any source in this list anyway.
         const cited = citations.some(
@@ -110,9 +105,12 @@ export function SourcesPanel({
             citation.article.toLowerCase() === source.article.toLowerCase(),
         );
         return (
-          <div
+          <button
             key={`${source.sr}-${source.article}-${source.lang}`}
-            className="flex flex-col gap-1.5 rounded-sm border border-divider bg-content1 p-3 text-foreground"
+            type="button"
+            aria-label={`SR ${source.sr} Art. ${source.article}`}
+            onClick={() => onOpenArticle(deduped, i)}
+            className="flex cursor-pointer flex-col gap-1.5 rounded-sm border border-divider bg-content1 p-3 text-left text-foreground transition-colors hover:border-primary hover:bg-content2"
           >
             <div className="flex items-center gap-2">
               <span className="font-medium">
@@ -130,10 +128,7 @@ export function SourcesPanel({
             {source.heading !== null && (
               <p className="line-clamp-2 text-sm text-foreground-500">{source.heading}</p>
             )}
-            <div
-              className="flex items-center gap-2"
-              title={`rerank score ${source.score.toFixed(2)}`}
-            >
+            <div className="flex items-center gap-2" title={`relevance ${percent(source.score)}%`}>
               <Progress
                 aria-label="Relevance"
                 size="sm"
@@ -141,31 +136,9 @@ export function SourcesPanel({
                 value={relativePercent(source.score, scores)}
                 className="max-w-24"
               />
-              <span className="text-xs text-foreground-400">{source.score.toFixed(2)}</span>
+              <span className="text-xs text-foreground-400">{percent(source.score)}%</span>
             </div>
-            <Button
-              size="sm"
-              variant="flat"
-              color="primary"
-              className="self-start"
-              aria-label="Open on Fedlex"
-              onPress={() => openExternal(source.eli)}
-              endContent={
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className="h-3.5 w-3.5"
-                  aria-hidden="true"
-                >
-                  <path d="M7 17L17 7M9 7h8v8" />
-                </svg>
-              }
-            >
-              Fedlex
-            </Button>
-          </div>
+          </button>
         );
       })}
     </aside>

@@ -44,7 +44,7 @@ function SearchResultRow({
       type="button"
       onClick={onSelect}
       onMouseEnter={onHover}
-      className={`flex w-full flex-col gap-1 rounded px-3 py-2 text-left ${
+      className={`flex w-full cursor-pointer flex-col gap-1 rounded px-3 py-2 text-left ${
         selected ? "bg-content2" : "hover:bg-content2"
       }`}
     >
@@ -65,7 +65,7 @@ function SearchResultRow({
 export interface SearchPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelect: (result: SearchResult) => void;
+  onSelect: (results: SearchResult[], index: number) => void;
 }
 
 /** Spotlight-style command palette over the corpus search endpoint —
@@ -125,9 +125,9 @@ export function SearchPalette({ isOpen, onClose, onSelect }: SearchPaletteProps)
 
   const maxScore = results.reduce((max, r) => Math.max(max, r.score), 0);
 
-  function handleSelect(result: SearchResult): void {
+  function handleSelect(index: number): void {
     onClose();
-    onSelect(result);
+    onSelect(results, index);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
@@ -140,10 +140,10 @@ export function SearchPalette({ isOpen, onClose, onSelect }: SearchPaletteProps)
       event.preventDefault();
       setSelectedIndex((prev) => (prev === null ? 0 : Math.max(prev - 1, 0)));
     } else if (event.key === "Enter") {
-      const target = selectedIndex !== null ? results[selectedIndex] : results[0];
-      if (target === undefined) return;
+      const targetIndex = selectedIndex ?? 0;
+      if (results[targetIndex] === undefined) return;
       event.preventDefault();
-      handleSelect(target);
+      handleSelect(targetIndex);
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -207,7 +207,7 @@ export function SearchPalette({ isOpen, onClose, onSelect }: SearchPaletteProps)
                       result={result}
                       maxScore={maxScore}
                       selected={i === selectedIndex}
-                      onSelect={() => handleSelect(result)}
+                      onSelect={() => handleSelect(i)}
                       onHover={() => setSelectedIndex(i)}
                     />
                   </li>

@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import type { ChatEvent } from "../lib/api";
 import { useChat } from "./useChat";
 
@@ -47,6 +47,7 @@ const SOURCE = {
 };
 const CITATION = {
   raw: "[SR 220 Art. 335c]",
+  label: "SR 220 Art. 335c",
   sr: "220",
   article: "335c",
   eli: "https://example.test/e",
@@ -98,6 +99,30 @@ describe("useChat", () => {
     expect(result.current.sources).toEqual([SOURCE]);
     expect(result.current.streaming).toBe(false);
     expect(result.current.banner).toBeNull();
+  });
+
+  test("done with zero citations clears sources", async () => {
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE, { ...SOURCE, article: "1" }] },
+        { type: "token", delta: "No applicable provision found." },
+        { type: "done", citations: [], model: "m", durationMs: 1 },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("q");
+    });
+
+    expect(result.current.sources).toEqual([]);
+    expect(result.current.messages.at(-1)?.sources).toEqual([]);
+    expect(appendMessageMock).toHaveBeenNthCalledWith(2, {
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "No applicable provision found.",
+      sourcesJson: "[]",
+    });
   });
 
   it("attaches the answer's sources to the assistant message", async () => {
@@ -625,7 +650,14 @@ describe("useChat persistence", () => {
         text: "Ein Monat [SR 220 Art. 335c], siehe auch [SR 210 Art. 1].",
         citations: [
           CITATION,
-          { raw: "[SR 210 Art. 1]", sr: "210", article: "1", eli: null, resolved: false },
+          {
+            raw: "[SR 210 Art. 1]",
+            label: "SR 210 Art. 1",
+            sr: "210",
+            article: "1",
+            eli: null,
+            resolved: false,
+          },
         ],
         error: null,
         sources: [SOURCE],
@@ -698,7 +730,9 @@ describe("useChat persistence", () => {
       await result.current.loadConversation("conv-9");
     });
     const loaded = [
-      { role: "assistant", text: "Loaded answer", citations: [], error: null, sources: undefined },
+      // No brackets in the text → no citations → sources cleared (see the
+      // zero-citations rule in loadConversation's rebuild).
+      { role: "assistant", text: "Loaded answer", citations: [], error: null, sources: [] },
     ];
     expect(result.current.messages).toEqual(loaded);
     expect(result.current.conversationId).toBe("conv-9");

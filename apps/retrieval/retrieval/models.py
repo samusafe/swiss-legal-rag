@@ -36,3 +36,16 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     results: list[SearchResult]
     took_ms: dict[str, int]
+
+
+class ArticleResponse(BaseModel):
+    sr: str
+    article: str
+    lang: str
+    heading: str | None
+    act_name: str
+    abbrev: str
+    eli: str
+    version_date: date
+    texts: list[str]
+    available_langs: list[str]

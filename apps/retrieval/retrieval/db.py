@@ -66,3 +66,27 @@ def fts_search(conn: psycopg.Connection, q: str, lang: str, k: int) -> list[Chun
             (config, q, lang, k),
         )
         return _rows(cur)
+
+
+def article_rows(
+    conn: psycopg.Connection, sr: str, article: str, lang: str
+) -> list[ChunkRow]:
+    """All stored parts of one article in one language, in document order."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_COLUMNS} FROM chunks "
+            "WHERE sr = %s AND lower(article) = lower(%s) AND lang = %s "
+            "ORDER BY part",
+            (sr, article, lang),
+        )
+        return _rows(cur)
+
+
+def article_langs(conn: psycopg.Connection, sr: str, article: str) -> list[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT lang FROM chunks "
+            "WHERE sr = %s AND lower(article) = lower(%s) ORDER BY lang",
+            (sr, article),
+        )
+        return [row[0] for row in cur.fetchall()]

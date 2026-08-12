@@ -1,9 +1,11 @@
 import json
+from datetime import date
 
 import psycopg
 from fastapi.testclient import TestClient
 
-from retrieval.app import create_app
+from retrieval.app import ArticleDeps, create_app
+from retrieval.db import ChunkRow
 from retrieval.search import SearchDeps
 from retrieval.security import RateLimiter
 from tests.test_search import A, deps_with
@@ -195,6 +197,7 @@ def test_chat_streams_sources_tokens_done(monkeypatch) -> None:
     assert done["citations"] == [
         {
             "raw": "[SR 220 Art. 3]",
+            "label": "SR 220 Art. 3",
             "sr": "220",
             "article": "3",
             "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_3",
@@ -507,6 +510,68 @@ def test_rate_limit_does_not_apply_to_get_endpoints(monkeypatch) -> None:
         responses = [client.get("/ingest/status") for _ in range(5)]
 
     assert all(r.status_code == 200 for r in responses)
+
+
+def _chunk_row(part: int, text: str, lang: str = "fr") -> ChunkRow:
+    return ChunkRow(
+        id=part + 1, sr="220", lang=lang, article="335b", part=part or None,
+        eid="art_335_b", heading="During the trial period", context=None, text=text,
+        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}#art_335_b",
+        act_name="Code of Obligations", abbrev="CO", version_date=date(2026, 1, 1),
+    )
+
+
+def test_article_returns_ordered_parts() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.article_deps = ArticleDeps(
+        rows=lambda sr, article, lang: [_chunk_row(1, "part one"), _chunk_row(2, "part two")],
+        langs=lambda sr, article: ["de", "fr", "it"],
+    )
+    with TestClient(app) as client:
+        response = client.get("/article", params={"sr": "220", "article": "335b", "lang": "fr"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["texts"] == ["part one", "part two"]
+    assert body["available_langs"] == ["de", "fr", "it"]
+    assert body["act_name"] == "Code of Obligations"
+    assert body["eli"].endswith("#art_335_b")
+
+
+def test_article_404_when_missing_everywhere() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.article_deps = ArticleDeps(
+        rows=lambda sr, article, lang: [], langs=lambda sr, article: [],
+    )
+    with TestClient(app) as client:
+        response = client.get("/article", params={"sr": "999", "article": "1", "lang": "de"})
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"]
+
+
+def test_article_404_names_other_langs() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.article_deps = ArticleDeps(
+        rows=lambda sr, article, lang: [], langs=lambda sr, article: ["de", "it"],
+    )
+    with TestClient(app) as client:
+        response = client.get("/article", params={"sr": "220", "article": "335b", "lang": "fr"})
+
+    assert response.status_code == 404
+    assert "de, it" in response.json()["detail"]
+
+
+def test_article_rejects_bad_lang() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    with TestClient(app) as client:
+        response = client.get("/article", params={"sr": "220", "article": "1", "lang": "en"})
+
+    assert response.status_code == 422
 
 
 def test_chat_reuses_lazy_httpx_client_across_requests(monkeypatch) -> None:

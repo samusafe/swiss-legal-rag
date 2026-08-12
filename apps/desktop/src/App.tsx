@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
-import { ArticlePreviewModal, primeArticlePreviewCache } from "./components/ArticlePreview";
+import { ArticleDocModal } from "./components/ArticleDocModal";
+import type { ArticleRef } from "./components/ArticleDocModal";
 import { Composer } from "./components/Composer";
 import { Header } from "./components/Header";
 import { MessageList } from "./components/MessageList";
@@ -9,14 +10,16 @@ import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
 import { SourcesPanel } from "./components/SourcesPanel";
 import { t, toSearchLang, useLang } from "./i18n";
-import type { SearchResult } from "./lib/api";
+import type { Citation, SearchResult, Source } from "./lib/api";
 import { useChat } from "./hooks/useChat";
+import type { ChatMessage } from "./hooks/useChat";
 import { useConversations } from "./hooks/useConversations";
 import { useHealth } from "./hooks/useHealth";
 import { useIngest } from "./hooks/useIngest";
 import { usePrefersReducedMotion } from "./hooks/usePrefersReducedMotion";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTheme } from "./hooks/useTheme";
+import { dedupe, toArticleRef } from "./lib/sources";
 import { prefs } from "./lib/prefs";
 
 type Panels = { left: boolean; right: boolean };
@@ -110,17 +113,45 @@ export default function App() {
     [loadConversation],
   );
 
-  const [previewTarget, setPreviewTarget] = useState<{
-    srNumber: string;
-    article: string;
+  const [articleTarget, setArticleTarget] = useState<{
+    refs: ArticleRef[];
+    index: number;
   } | null>(null);
 
+  const handleOpenSource = useCallback((list: Source[], index: number) => {
+    setArticleTarget({ refs: list.map(toArticleRef), index });
+  }, []);
+
+  const handleOpenCitation = useCallback((citation: Citation, message: ChatMessage) => {
+    const list = dedupe(message.sources ?? []);
+    const index = list.findIndex(
+      (s) =>
+        s.sr === citation.sr &&
+        s.article.toLowerCase() === citation.article.toLowerCase(),
+    );
+    if (index === -1) return; // resolved citations always match, but stay safe
+    setArticleTarget({ refs: list.map(toArticleRef), index });
+  }, []);
+
   const handleSearchSelect = useCallback(
-    (result: SearchResult) => {
-      // The sidebar already has the exact match in hand — prime the preview's
-      // cache so opening it is instant instead of re-fetching what we just fetched.
-      primeArticlePreviewCache(toSearchLang(lang), result);
-      setPreviewTarget({ srNumber: result.sr, article: result.article });
+    (results: SearchResult[], index: number) => {
+      // Results may repeat an article (split parts); keep the first occurrence
+      // per (sr, article) and point the modal at the clicked one's slot.
+      const searchLang = toSearchLang(lang);
+      const refs: ArticleRef[] = [];
+      const slotByKey = new Map<string, number>();
+      let targetIndex = 0;
+      for (const [i, result] of results.entries()) {
+        const key = `${result.sr}:${result.article.toLowerCase()}`;
+        let slot = slotByKey.get(key);
+        if (slot === undefined) {
+          slot = refs.length;
+          slotByKey.set(key, slot);
+          refs.push({ sr: result.sr, article: result.article, lang: searchLang });
+        }
+        if (i === index) targetIndex = slot;
+      }
+      setArticleTarget({ refs, index: targetIndex });
     },
     [lang],
   );
@@ -185,6 +216,7 @@ export default function App() {
             thinking={thinking}
             selectedIndex={selectedIndex}
             onSelect={(i) => setSelectedIndex((prev) => (prev === i ? null : i))}
+            onOpenCitation={handleOpenCitation}
           />
           <Composer
             disabled={streaming || !online}
@@ -223,6 +255,7 @@ export default function App() {
                 streaming={streaming && selectedIndex === null}
                 citations={panelCitations}
                 subtitle={subtitle}
+                onOpenArticle={handleOpenSource}
                 onCollapse={toggleRight}
               />
             )}
@@ -253,7 +286,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         ingest={ingest}
       />
-      <ArticlePreviewModal target={previewTarget} onClose={() => setPreviewTarget(null)} />
+      <ArticleDocModal target={articleTarget} onClose={() => setArticleTarget(null)} />
       <SearchPalette
         isOpen={paletteOpen}
         onClose={() => setPaletteOpen(false)}

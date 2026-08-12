@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { useState, type KeyboardEvent } from "react";
 import type { ChatMessage } from "../hooks/useChat";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import type { Citation } from "../lib/api";
 import { SHOW_THINKING } from "../lib/api";
 import { splitCitations } from "../lib/citations";
 import { CitationChip } from "./CitationChip";
@@ -92,6 +93,7 @@ export function MessageList({
   thinking,
   selectedIndex,
   onSelect,
+  onOpenCitation,
   showThinking = SHOW_THINKING,
 }: {
   messages: ChatMessage[];
@@ -100,6 +102,7 @@ export function MessageList({
   thinking: string;
   selectedIndex: number | null;
   onSelect: (index: number) => void;
+  onOpenCitation?: (citation: Citation, message: ChatMessage) => void;
   // Defaults to the build-time VITE_SHOW_THINKING flag; overridable so tests
   // can exercise both states without stubbing import.meta.env.
   showThinking?: boolean;
@@ -168,7 +171,17 @@ export function MessageList({
                 segment.kind === "text" ? (
                   <span key={j}>{segment.text}</span>
                 ) : (
-                  <CitationChip key={j} citation={segment.citation} />
+                  segment.citations.map((citation, k) => (
+                    <CitationChip
+                      key={`${j}-${k}`}
+                      citation={citation}
+                      onOpen={
+                        onOpenCitation === undefined
+                          ? undefined
+                          : (c) => onOpenCitation(c, message)
+                      }
+                    />
+                  ))
                 ),
               )
             )}

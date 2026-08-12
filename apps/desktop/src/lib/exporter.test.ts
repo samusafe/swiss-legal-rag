@@ -45,6 +45,18 @@ const ASSISTANT_NO_SOURCES: StoredMessage = {
   createdAt: "2026-01-01T00:00:02.000Z",
 };
 
+// Pre-change data: a refusal answer stored before the zero-citations rule
+// existed still carries the retrieved sources in sourcesJson, even though
+// the answer text cites nothing.
+const REFUSAL_WITH_STALE_SOURCES: StoredMessage = {
+  id: "m5",
+  conversationId: "conv-1",
+  role: "assistant",
+  content: "The current corpus contains no sources sufficient to answer this question.",
+  sourcesJson: JSON.stringify([SOURCE]),
+  createdAt: "2026-01-01T00:00:03.000Z",
+};
+
 describe("exporter.toJson", () => {
   it("serializes the conversation and messages as pretty-printed JSON", () => {
     const json = toJson(CONVERSATION, [USER_MESSAGE, ASSISTANT_MESSAGE]);
@@ -101,5 +113,21 @@ describe("exporter.toMarkdown", () => {
 
   it("handles an empty conversation", () => {
     expect(toMarkdown(CONVERSATION, [])).toBe("# Kündigungsfrist?\n");
+  });
+
+  it("omits stale sourcesJson on a stored refusal answer that cites nothing", () => {
+    // Pre-change data: sourcesJson still holds the retrieved articles even
+    // though the refusal text has no [SR ... Art. ...] citation. The export
+    // must not leak them, mirroring useChat's loadConversation rule.
+    const md = toMarkdown(CONVERSATION, [REFUSAL_WITH_STALE_SOURCES]);
+    expect(md).not.toContain("- SR");
+    expect(md).toBe(
+      [
+        "# Kündigungsfrist?",
+        "",
+        "**Assistant:** The current corpus contains no sources sufficient to answer this question.",
+        "",
+      ].join("\n"),
+    );
   });
 });

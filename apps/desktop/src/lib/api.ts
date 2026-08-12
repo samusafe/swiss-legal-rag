@@ -11,6 +11,7 @@ export interface Source {
 
 export interface Citation {
   raw: string;
+  label: string;
   sr: string;
   article: string;
   eli: string | null;
@@ -38,6 +39,15 @@ export const API_KEY: string = import.meta.env.VITE_API_KEY ?? "";
 
 function authHeaders(base: Record<string, string> = {}): Record<string, string> {
   return API_KEY === "" ? base : { ...base, "X-API-Key": API_KEY };
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
 export async function getHealth(): Promise<boolean> {
@@ -183,6 +193,58 @@ export async function search(
     actName: r.act_name,
     score: r.score,
   }));
+}
+
+export interface Article {
+  sr: string;
+  article: string;
+  lang: string;
+  heading: string | null;
+  actName: string;
+  abbrev: string;
+  eli: string;
+  versionDate: string;
+  texts: string[];
+  availableLangs: string[];
+}
+
+export async function fetchArticle(
+  sr: string,
+  article: string,
+  lang: SearchLang,
+  signal?: AbortSignal,
+): Promise<Article> {
+  const params = new URLSearchParams({ sr, article, lang });
+  const response = await fetch(`${API_BASE_URL}/article?${params.toString()}`, {
+    headers: authHeaders(),
+    signal,
+  });
+  if (!response.ok) throw new ApiError(await errorDetail(response), response.status);
+  // Backend boundary cast: payload shape owned and tested by apps/retrieval.
+  const data = (await response.json()) as {
+    sr: string;
+    article: string;
+    lang: string;
+    heading: string | null;
+    act_name: string;
+    abbrev: string;
+    eli: string;
+    version_date: string;
+    texts: string[];
+    available_langs: string[];
+  };
+  return {
+    sr: data.sr,
+    article: data.article,
+    lang: data.lang,
+    heading: data.heading,
+    actName: data.act_name,
+    abbrev: data.abbrev,
+    eli: data.eli,
+    versionDate: data.version_date,
+    texts: data.texts,
+    availableLangs: data.available_langs,
+  };
 }
 
 export interface IngestStatus {

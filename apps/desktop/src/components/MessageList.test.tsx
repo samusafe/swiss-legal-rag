@@ -10,6 +10,7 @@ vi.mock("../lib/open", () => ({
 
 const RESOLVED = {
   raw: "[SR 220 Art. 335c]",
+  label: "SR 220 Art. 335c",
   sr: "220",
   article: "335c",
   eli: "https://example.test/e",
@@ -17,6 +18,7 @@ const RESOLVED = {
 };
 const UNRESOLVED = {
   raw: "[SR 210 Art. 1]",
+  label: "SR 210 Art. 1",
   sr: "210",
   article: "1",
   eli: null,
@@ -45,9 +47,45 @@ describe("MessageList", () => {
       </HeroUIProvider>,
     );
 
-    expect(screen.getByRole("button", { name: "[SR 220 Art. 335c]" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "[SR 210 Art. 1]" })).not.toBeInTheDocument();
-    expect(screen.getByText("[SR 210 Art. 1]")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "SR 220 Art. 335c" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "SR 210 Art. 1" })).not.toBeInTheDocument();
+    expect(screen.getByText("SR 210 Art. 1")).toBeInTheDocument();
+  });
+
+  it("renders one chip button per reference when two citations share a raw bracket", () => {
+    const shared = {
+      raw: "[SR 822.11 Art. 9, SR 822.11 Art. 12]",
+      sr: "822.11",
+      eli: "https://example.test/e",
+      resolved: true,
+    };
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            {
+              role: "assistant",
+              text: "See [SR 822.11 Art. 9, SR 822.11 Art. 12].",
+              citations: [
+                { ...shared, label: "SR 822.11 Art. 9", article: "9" },
+                { ...shared, label: "SR 822.11 Art. 12", article: "12" },
+              ],
+              error: null,
+            },
+          ]}
+          streaming={false}
+          searching={false}
+          thinking=""
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    // Anchored: the assistant bubble itself is also role="button" (selection)
+    // and its accessible name — the concatenated bubble text — also contains
+    // "SR" but never starts with it, so this isolates the two citation chips.
+    expect(screen.getAllByRole("button", { name: /^SR/ })).toHaveLength(2);
   });
 
   it("renders user and assistant bubbles in order", () => {

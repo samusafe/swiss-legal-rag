@@ -17,6 +17,14 @@ vi.mock("./lib/api", () => ({
   getHealth: vi.fn().mockResolvedValue(false),
   postChat: vi.fn(),
   search: vi.fn().mockResolvedValue([]),
+  fetchArticle: vi.fn(),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
   getIngestStatus: vi.fn().mockResolvedValue({
     running: false,
     phase: null,
@@ -47,11 +55,13 @@ vi.mock("./lib/db", () => ({
   getMessages: vi.fn(),
 }));
 
-import { search } from "./lib/api";
+import { fetchArticle, search } from "./lib/api";
+import type { Article } from "./lib/api";
 import { deleteConversation, listConversations, renameConversation } from "./lib/db";
 import type { Conversation } from "./lib/db";
 
 const searchMock = vi.mocked(search);
+const fetchArticleMock = vi.mocked(fetchArticle);
 const listConversationsMock = vi.mocked(listConversations);
 const deleteConversationMock = vi.mocked(deleteConversation);
 const renameConversationMock = vi.mocked(renameConversation);
@@ -117,9 +127,23 @@ it("toggles the sources panel with ctrl+j, unmounting it so its controls leave t
   expect(screen.queryByRole("button", { name: "Expand sources" })).not.toBeInTheDocument();
 });
 
-it("opens an ArticlePreview modal, primed from the clicked result, when a palette search result is selected", async () => {
+it("opens the article document modal when a palette search result is selected", async () => {
   searchMock.mockReset();
   searchMock.mockResolvedValue([RESULT]);
+  fetchArticleMock.mockReset();
+  const article: Article = {
+    sr: "220",
+    article: "335c",
+    lang: "de",
+    heading: "Kündigungsfrist",
+    actName: "Obligationenrecht",
+    abbrev: "OR",
+    eli: "https://example.test/220",
+    versionDate: "2024-01-01",
+    texts: ["Die Kündigungsfrist beträgt einen Monat."],
+    availableLangs: ["de"],
+  };
+  fetchArticleMock.mockResolvedValue(article);
   const user = userEvent.setup();
   render(
     <HeroUIProvider>
@@ -131,18 +155,15 @@ it("opens an ArticlePreview modal, primed from the clicked result, when a palett
   await user.click(screen.getByRole("button", { name: "Open article search" }));
   await user.type(screen.getByPlaceholderText("Search articles…"), "kündigungsfrist");
   await screen.findByText("SR 220 · Art. 335c", undefined, { timeout: 1000 });
-  searchMock.mockClear();
 
   await user.click(screen.getByText("SR 220 · Art. 335c"));
 
-  // Selecting a result closes the palette and opens the preview.
+  // Selecting a result closes the palette and opens the article document modal.
   expect(
     await screen.findByText("Die Kündigungsfrist beträgt einen Monat."),
   ).toBeInTheDocument();
   expect(screen.queryByPlaceholderText("Search articles…")).not.toBeInTheDocument();
-  // The clicked row already carried the match — the preview must reuse it,
-  // not re-fetch.
-  expect(searchMock).not.toHaveBeenCalled();
+  expect(fetchArticleMock).toHaveBeenCalledWith("220", "335c", "de", expect.any(AbortSignal));
 });
 
 it("opens Settings from the header gear", async () => {

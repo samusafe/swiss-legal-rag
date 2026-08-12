@@ -275,6 +275,55 @@ const dict = {
   },
   "theme.light": { en: "Light", de: "Hell", fr: "Clair", it: "Chiaro", pt: "Claro" },
   "theme.dark": { en: "Dark", de: "Dunkel", fr: "Sombre", it: "Scuro", pt: "Escuro" },
+  "article.loading": {
+    en: "Loading article…",
+    de: "Artikel wird geladen…",
+    fr: "Chargement de l'article…",
+    it: "Caricamento dell'articolo…",
+    pt: "A carregar o artigo…",
+  },
+  "article.error": {
+    en: "Could not load the article. Please try again.",
+    de: "Der Artikel konnte nicht geladen werden. Bitte erneut versuchen.",
+    fr: "Impossible de charger l'article. Veuillez réessayer.",
+    it: "Impossibile caricare l'articolo. Riprova.",
+    pt: "Não foi possível carregar o artigo. Tente novamente.",
+  },
+  "article.notInLang": {
+    en: "This article is not available in this language.",
+    de: "Dieser Artikel ist in dieser Sprache nicht verfügbar.",
+    fr: "Cet article n'est pas disponible dans cette langue.",
+    it: "Questo articolo non è disponibile in questa lingua.",
+    pt: "Este artigo não está disponível nesta língua.",
+  },
+  "article.fedlex": {
+    en: "Open in Fedlex",
+    de: "In Fedlex öffnen",
+    fr: "Ouvrir dans Fedlex",
+    it: "Apri in Fedlex",
+    pt: "Abrir no Fedlex",
+  },
+  "article.version": {
+    en: "Version of {date}",
+    de: "Fassung vom {date}",
+    fr: "Version du {date}",
+    it: "Versione del {date}",
+    pt: "Versão de {date}",
+  },
+  "article.prev": {
+    en: "Previous article",
+    de: "Vorheriger Artikel",
+    fr: "Article précédent",
+    it: "Articolo precedente",
+    pt: "Artigo anterior",
+  },
+  "article.next": {
+    en: "Next article",
+    de: "Nächster Artikel",
+    fr: "Article suivant",
+    it: "Articolo successivo",
+    pt: "Artigo seguinte",
+  },
 } satisfies Record<string, { en: string } & Partial<Record<Exclude<Lang, "en">, string>>>;
 
 export type UiKey = keyof typeof dict;

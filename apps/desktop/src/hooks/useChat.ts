@@ -157,11 +157,23 @@ export function useChat() {
                 updateLast(prev, (m) => ({ ...m, text: m.text + event.delta })),
               );
               break;
-            case "done":
+            case "done": {
+              // A refusal answer cites nothing — hide its sources rather than
+              // leaving the last-searched articles displayed as if relevant.
+              const cleared = event.citations.length === 0;
+              if (cleared) {
+                finalSources = [];
+                setSources([]);
+              }
               setMessages((prev) =>
-                updateLast(prev, (m) => ({ ...m, citations: event.citations })),
+                updateLast(prev, (m) => ({
+                  ...m,
+                  citations: event.citations,
+                  ...(cleared ? { sources: [] } : {}),
+                })),
               );
               break;
+            }
             case "error":
               hadError = true;
               setMessages((prev) =>
@@ -253,12 +265,16 @@ export function useChat() {
         const rebuilt: ChatMessage[] = stored.map((m) => {
           const msgSources: Source[] | undefined =
             m.sourcesJson !== null ? (JSON.parse(m.sourcesJson) as Source[]) : undefined;
+          const citations =
+            m.role === "assistant" ? extractCitations(m.content, msgSources ?? []) : [];
           return {
             role: m.role,
             text: m.content,
             error: null,
-            citations: m.role === "assistant" ? extractCitations(m.content, msgSources ?? []) : [],
-            sources: msgSources,
+            citations,
+            // An answer that cites nothing gets no sources — mirrors the live
+            // `done` handling for conversations stored before this rule existed.
+            sources: m.role === "assistant" && citations.length === 0 ? [] : msgSources,
           };
         });
         setConvId(id);

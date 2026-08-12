@@ -4,11 +4,16 @@ from pydantic import BaseModel
 
 from retrieval.models import SearchResult
 
-_CITATION_RE = re.compile(r"\[SR\s+([\d.]+)\s+Art\.\s*([\w.]+)\]")
+# A bracket may carry several comma/semicolon-separated references:
+# "[SR 822.11 Art. 9, SR 822.11 Art. 12]". Match whole brackets first,
+# then each reference inside; brackets with no SR reference are prose.
+_BRACKET_RE = re.compile(r"\[([^\]]+)\]")
+_REF_RE = re.compile(r"SR\s+([\d.]+)\s+Art\.\s*([\w.]+)")
 
 
 class Citation(BaseModel):
     raw: str
+    label: str
     sr: str
     article: str
     eli: str | None
@@ -37,21 +42,29 @@ def extract_citations(
 ) -> list[Citation]:
     by_key = _resolve_by_key(sources, answer_lang)
     citations: list[Citation] = []
-    seen: set[str] = set()
-    for match in _CITATION_RE.finditer(answer):
-        raw = match.group(0)
-        if raw in seen:
+    seen_raws: set[str] = set()
+    for bracket in _BRACKET_RE.finditer(answer):
+        raw = bracket.group(0)
+        if raw in seen_raws:
             continue
-        seen.add(raw)
-        sr, article = match.group(1), match.group(2)
-        source = by_key.get((sr, article.lower()))
-        citations.append(
-            Citation(
-                raw=raw,
-                sr=sr,
-                article=article,
-                eli=source.eli if source is not None else None,
-                resolved=source is not None,
+        emitted: set[tuple[str, str]] = set()
+        for ref in _REF_RE.finditer(bracket.group(1)):
+            sr, article = ref.group(1), ref.group(2)
+            key = (sr, article.lower())
+            if key in emitted:
+                continue
+            emitted.add(key)
+            source = by_key.get(key)
+            citations.append(
+                Citation(
+                    raw=raw,
+                    label=f"SR {sr} Art. {article}",
+                    sr=sr,
+                    article=article,
+                    eli=source.eli if source is not None else None,
+                    resolved=source is not None,
+                )
             )
-        )
+        if emitted:
+            seen_raws.add(raw)
     return citations

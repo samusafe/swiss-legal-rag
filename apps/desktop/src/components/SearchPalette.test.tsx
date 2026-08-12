@@ -156,7 +156,20 @@ describe("SearchPalette", () => {
     await screen.findByText("SR 220 · Art. 335c", undefined, { timeout: 1000 });
     await user.click(screen.getByText("SR 220 · Art. 335c"));
 
-    expect(props.onSelect).toHaveBeenCalledWith(RESULT_A);
+    expect(props.onSelect).toHaveBeenCalledWith([RESULT_A], 0);
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("selecting the second row calls onSelect with the full results array and its index", async () => {
+    searchMock.mockResolvedValue([RESULT_A, RESULT_B]);
+    const user = userEvent.setup();
+    const props = renderPalette();
+
+    await user.type(screen.getByPlaceholderText("Search articles…"), "frist");
+    await screen.findByText("SR 210 · Art. 1", undefined, { timeout: 1000 });
+    await user.click(screen.getByText("SR 210 · Art. 1"));
+
+    expect(props.onSelect).toHaveBeenCalledWith([RESULT_A, RESULT_B], 1);
     expect(props.onClose).toHaveBeenCalledOnce();
   });
 
@@ -170,7 +183,7 @@ describe("SearchPalette", () => {
     await screen.findByText("SR 220 · Art. 335c", undefined, { timeout: 1000 });
     await user.type(input, "{Enter}");
 
-    expect(props.onSelect).toHaveBeenCalledWith(RESULT_A);
+    expect(props.onSelect).toHaveBeenCalledWith([RESULT_A, RESULT_B], 0);
     expect(props.onClose).toHaveBeenCalledOnce();
   });
 
@@ -186,7 +199,7 @@ describe("SearchPalette", () => {
     await user.type(input, "{ArrowDown}");
     await user.type(input, "{Enter}");
 
-    expect(props.onSelect).toHaveBeenCalledWith(RESULT_B);
+    expect(props.onSelect).toHaveBeenCalledWith([RESULT_A, RESULT_B], 1);
   });
 
   it("Enter is a no-op while no results have loaded", async () => {

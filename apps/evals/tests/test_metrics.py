@@ -1,6 +1,7 @@
 import pytest
 
 from evals.metrics import (
+    _SOURCE_RE,
     citation_scores,
     keyword_recall,
     refusal_ok,
@@ -9,29 +10,43 @@ from evals.metrics import (
 )
 
 
+def test_source_re_accepts_cantonal() -> None:
+    assert _SOURCE_RE.match("sGS 811.1 Art. 2")
+    assert _SOURCE_RE.match("BSG 721.0 Art. 4")
+    assert _SOURCE_RE.match("SR 220 Art. 335c")
+
+
 def test_retrieval_hit_true_when_expected_source_present():
-    results = [{"sr": "220", "article": "1"}, {"sr": "210", "article": "2"}]
+    results = [
+        {"collection": "SR", "number": "220", "article": "1"},
+        {"collection": "SR", "number": "210", "article": "2"},
+    ]
     assert retrieval_hit(results, ["SR 220 Art. 1"]) is True
 
 
+def test_retrieval_hit_cantonal() -> None:
+    results = [{"collection": "sGS", "number": "811.1", "article": "2"}]
+    assert retrieval_hit(results, ("sGS 811.1 Art. 2",))
+
+
 def test_retrieval_hit_false_when_no_result_matches():
-    results = [{"sr": "220", "article": "1"}]
+    results = [{"collection": "SR", "number": "220", "article": "1"}]
     assert retrieval_hit(results, ["SR 999 Art. 9"]) is False
 
 
 def test_retrieval_hit_none_when_expected_sources_empty():
-    assert retrieval_hit([{"sr": "220", "article": "1"}], []) is None
+    assert retrieval_hit([{"collection": "SR", "number": "220", "article": "1"}], []) is None
 
 
 def test_retrieval_hit_is_case_insensitive():
-    results = [{"sr": "220", "article": "1"}]
+    results = [{"collection": "SR", "number": "220", "article": "1"}]
     assert retrieval_hit(results, ["sr 220 art. 1"]) is True
 
 
 def test_citation_scores_precision_and_recall():
     citations = [
-        {"sr": "220", "article": "1", "resolved": True},
-        {"sr": "210", "article": "2", "resolved": True},
+        {"collection": "SR", "number": "220", "article": "1", "resolved": True},
+        {"collection": "SR", "number": "210", "article": "2", "resolved": True},
     ]
     precision, recall = citation_scores(citations, ["SR 220 Art. 1"])
     assert precision == 0.5
@@ -40,8 +55,8 @@ def test_citation_scores_precision_and_recall():
 
 def test_citation_scores_excludes_unresolved_citations():
     citations = [
-        {"sr": "220", "article": "1", "resolved": False},
-        {"sr": "210", "article": "2", "resolved": True},
+        {"collection": "SR", "number": "220", "article": "1", "resolved": False},
+        {"collection": "SR", "number": "210", "article": "2", "resolved": True},
     ]
     precision, recall = citation_scores(citations, ["SR 220 Art. 1"])
     assert precision == 0.0
@@ -55,15 +70,30 @@ def test_citation_scores_empty_cited_gives_none_precision_but_real_recall():
 
 
 def test_citation_scores_empty_expected_gives_real_precision_but_none_recall():
-    citations = [{"sr": "220", "article": "1", "resolved": True}]
+    citations = [{"collection": "SR", "number": "220", "article": "1", "resolved": True}]
     precision, recall = citation_scores(citations, [])
     assert precision == 0.0
     assert recall is None
 
 
 def test_citation_scores_matches_case_insensitively_on_article():
-    citations = [{"sr": "220", "article": "1A", "resolved": True}]
+    citations = [{"collection": "SR", "number": "220", "article": "1A", "resolved": True}]
     precision, recall = citation_scores(citations, ["SR 220 Art. 1a"])
+    assert precision == 1.0
+    assert recall == 1.0
+
+
+def test_citation_scores_matches_cantonal_collection():
+    citations = [{"collection": "sGS", "number": "811.1", "article": "2", "resolved": True}]
+    precision, recall = citation_scores(citations, ["sGS 811.1 Art. 2"])
+    assert precision == 1.0
+    assert recall == 1.0
+
+
+def test_citation_scores_collection_case_insensitive():
+    # Gold source uppercase, citation dict mixed case — must match case-insensitively
+    citations = [{"collection": "sGS", "number": "811.1", "article": "2", "resolved": True}]
+    precision, recall = citation_scores(citations, ["SGS 811.1 Art. 2"])
     assert precision == 1.0
     assert recall == 1.0
 

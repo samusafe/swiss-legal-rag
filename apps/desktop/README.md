@@ -42,6 +42,12 @@ The interface uses a dedicated "chancery" HeroUI theme (`chancery-light` / `chan
 
 UI copy is available in English, German, French, Italian, and European Portuguese; switch it from Settings > General. The corpus itself is only indexed in German, French, and Italian, so English and Portuguese fall back to the closest corpus language (German and French, respectively) when searching or asking a question — answer text still reflects the retrieved source language.
 
+### Jurisdiction
+
+Settings > General also has a Jurisdiction picker: "None — federal law only" (the default) or one of the 26 cantons. Selecting a canton sends its two-letter code as `canton` on every `/search` and `/chat` request; the server includes that canton's law in the results alongside the federal corpus. Cantons without an ingested corpus yet are still selectable — they show a "federal only" badge in the dropdown and behave exactly like "None" until that canton is ingested (currently SG and BE are covered; see the root README's Coverage table). The choice persists locally and is recorded in the Activity tab's audit trail.
+
+Cantonal sources render with their own citation label (e.g. `sGS 811.1 Art. 2` for St. Gallen, `BSG 661.11 Art. 2` for Bern) instead of the federal `SR <number>` form, and their citation chips and "Open in official portal" links point at that canton's own legal-text site (`gesetzessammlung.sg.ch` for SG, `belex.sites.be.ch` for BE) rather than Fedlex — the client only ever opens URLs on an allowlist of known official portals, federal and cantonal.
+
 ### Keyboard shortcuts
 
 | Shortcut | Action |
@@ -70,9 +76,9 @@ The database file, `conversations.db`, lives in the OS-standard per-app configur
 
 A Spotlight-style search palette, opened from the header trigger or `Ctrl+K`, calls the retrieval API's `POST /search` directly (not the chat endpoint) with a `{q, k, lang}` JSON body, returning ranked article chunks with a relevance bar as you type. Because retrieval runs on CPU-only hardware, a search can take anywhere from a few seconds to about a minute; the palette shows a persistent spinner and status label for the whole wait rather than appearing to hang. Results are navigable with the arrow keys and select with Enter or a click.
 
-Selecting a palette result, clicking a citation chip in the chat transcript, or clicking a source card opens the same article reader modal, backed by `GET /article`. It shows the complete article text (not just the retrieved chunk) with DE/FR/IT tabs to switch language on the spot, `←`/`→` navigation across the set of articles it was opened with (every citation in an answer, or the palette's result list), and an "Open in Fedlex" button that opens the official article page in the system browser, anchored to that specific article for the vast majority of entries (a handful of ambiguous anchors fall back to the act's page instead of a wrong one). A language tab for a translation the corpus doesn't have is disabled rather than hidden.
+Selecting a palette result, clicking a citation chip in the chat transcript, or clicking a source card opens the same article reader modal, backed by `GET /article`. It shows the complete article text (not just the retrieved chunk) with DE/FR/IT tabs to switch language on the spot, `←`/`→` navigation across the set of articles it was opened with (every citation in an answer, or the palette's result list), and an "Open official source" button that opens the article's official page in the system browser — Fedlex for federal acts, the canton's own LexWork portal for cantonal acts — anchored to that specific article for the vast majority of entries (a handful of ambiguous anchors fall back to the act's page instead of a wrong one). A language tab for a translation the corpus doesn't have is disabled rather than hidden.
 
-In the chat transcript, each `[SR <nr> Art. <x>]` citation renders as a clickable chip; an answer that cites several articles in one bracket (e.g. `[SR 220 Art. 1, Art. 2]`) renders one chip per reference, each independently opening the reader on that article. Answers that cite nothing (including refusals) show no sources panel entries.
+In the chat transcript, each `[<collection> <number> Art. <x>]` citation (`SR 220 Art. 335c` for federal law, `sGS 811.1 Art. 2` or `BSG 661.11 Art. 2` for the cantonal pilots) renders as a clickable chip; an answer that cites several articles in one bracket (e.g. `[SR 220 Art. 1, Art. 2]`) renders one chip per reference, each independently opening the reader on that article. Answers that cite nothing (including refusals) show no sources panel entries.
 
 ## Behavior
 

@@ -49,7 +49,10 @@ def test_run_writes_results_json_with_expected_shape_and_records_row_errors(tmp_
             return httpx.Response(500, text="boom")
         return httpx.Response(
             200,
-            json={"results": [{"sr": "220", "article": "1"}], "took_ms": {"embed": 1}},
+            json={
+                "results": [{"collection": "SR", "number": "220", "article": "1"}],
+                "took_ms": {"embed": 1},
+            },
         )
 
     transport = httpx.MockTransport(handler)
@@ -159,15 +162,20 @@ def test_run_full_mode_calls_search_and_chat_and_scores_both(tmp_path):
         if request.url.path == "/search":
             return httpx.Response(
                 200,
-                json={"results": [{"sr": "220", "article": "1"}], "took_ms": {"embed": 1}},
+                json={
+                "results": [{"collection": "SR", "number": "220", "article": "1"}],
+                "took_ms": {"embed": 1},
+            },
             )
         assert request.url.path == "/chat"
         if body["question"] == "Frage eins":
             citation = {
                 "raw": "[SR 220 Art. 1]",
-                "sr": "220",
+                "collection": "SR",
+                "number": "220",
                 "article": "1",
-                "eli": "https://example.org/eli",
+                "citation_label": "SR 220 Art. 1",
+                "source_url": "https://example.org/source",
                 "resolved": True,
             }
             events = [
@@ -273,7 +281,10 @@ def test_run_retrieval_only_mode_does_not_call_chat(tmp_path):
         assert request.url.path == "/search"
         return httpx.Response(
             200,
-            json={"results": [{"sr": "220", "article": "1"}], "took_ms": {"embed": 1}},
+            json={
+                "results": [{"collection": "SR", "number": "220", "article": "1"}],
+                "took_ms": {"embed": 1},
+            },
         )
 
     transport = httpx.MockTransport(handler)

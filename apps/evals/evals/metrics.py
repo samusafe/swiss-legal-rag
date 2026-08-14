@@ -10,7 +10,7 @@ import re
 import statistics
 from collections.abc import Sequence
 
-_SOURCE_RE = re.compile(r"^SR\s+(\S+)\s+Art\.\s+(\S+)$", re.IGNORECASE)
+_SOURCE_RE = re.compile(r"^(\S+)\s+(\S+)\s+Art\.\s+(\S+)$", re.IGNORECASE)
 
 # Must match retrieval/generation.py's REFUSAL_SENTENCE verbatim (apps/evals has no
 # dependency on apps/retrieval — the two packages talk over HTTP, so the sentence is
@@ -18,18 +18,20 @@ _SOURCE_RE = re.compile(r"^SR\s+(\S+)\s+Art\.\s+(\S+)$", re.IGNORECASE)
 REFUSAL_SENTENCE = "The current corpus contains no sources sufficient to answer this question."
 
 
-def _parse_source(source: str) -> tuple[str, str]:
+def _parse_source(source: str) -> tuple[str, str, str]:
     match = _SOURCE_RE.match(source.strip())
     if not match:
         raise ValueError(f"unparseable source reference: {source!r}")
-    sr, article = match.groups()
-    return sr, article.lower()
+    collection, number, article = match.groups()
+    return collection.casefold(), number, article.lower()
 
 
 def retrieval_hit(results: list[dict], expected_sources: Sequence[str]) -> bool | None:
     if not expected_sources:
         return None
-    candidates = {f"SR {r['sr']} Art. {r['article']}".casefold() for r in results}
+    candidates = {
+        f"{r['collection']} {r['number']} Art. {r['article']}".casefold() for r in results
+    }
     return any(source.casefold() in candidates for source in expected_sources)
 
 
@@ -37,7 +39,9 @@ def citation_scores(
     citations: list[dict], expected_sources: Sequence[str]
 ) -> tuple[float | None, float | None]:
     cited = {
-        (c["sr"], c["article"].lower()) for c in citations if c.get("resolved")
+        (c["collection"].casefold(), c["number"], c["article"].lower())
+        for c in citations
+        if c.get("resolved")
     }
     expected = {_parse_source(source) for source in expected_sources}
 

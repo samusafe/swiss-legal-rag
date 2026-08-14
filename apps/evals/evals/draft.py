@@ -1,7 +1,8 @@
 """LLM-assisted gold-question drafting CLI.
 
-Samples chunks from the ingestion pipeline's `data/chunks/<sr>/<lang>.jsonl`
-output and asks a local Ollama chat model to draft one exam-style question
+Samples chunks from the ingestion pipeline's
+`data/chunks/<jurisdiction>/<number>/<lang>.jsonl` output and asks a local
+Ollama chat model to draft one exam-style question
 per chunk, in the chunk's own language, answerable from the article text
 alone. Output is written as a `gold.jsonl`-shaped file that a human curator
 must review before promoting rows into `data/gold.jsonl` — draft rows are
@@ -47,10 +48,7 @@ _SYSTEM_PROMPT = (
 
 def _load_chunks(chunks_dir: Path, lang: str) -> list[dict]:
     chunks: list[dict] = []
-    for act_dir in sorted(p for p in chunks_dir.iterdir() if p.is_dir()):
-        chunk_file = act_dir / f"{lang}.jsonl"
-        if not chunk_file.exists():
-            continue
+    for chunk_file in sorted(chunks_dir.glob(f"*/*/{lang}.jsonl")):
         for line in chunk_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -71,7 +69,7 @@ def build_chat_request(chunk: dict, model: str) -> dict:
     """Build the JSON body for Ollama's non-streaming `/api/chat` endpoint."""
     user_prompt = (
         f"Article language: {chunk['lang']}\n"
-        f"SR {chunk['sr']} Art. {chunk['article']}\n\n"
+        f"{chunk['collection']} {chunk['number']} Art. {chunk['article']}\n\n"
         f"{chunk['text']}"
     )
     return {
@@ -133,7 +131,7 @@ def build_gold_row(chunk: dict, parsed: dict, index: int) -> dict:
         "id": f"draft-{chunk['lang']}-{index}",
         "lang": chunk["lang"],
         "question": parsed["question"],
-        "expected_sources": [f"SR {chunk['sr']} Art. {chunk['article']}"],
+        "expected_sources": [f"{chunk['collection']} {chunk['number']} Art. {chunk['article']}"],
         "expected_keywords": parsed["keywords"],
         "must_refuse": False,
     }
@@ -154,7 +152,7 @@ def _draft_row(
         content = response.json()["message"]["content"]
         parsed = parse_model_output(content)
     except Exception as error:  # noqa: BLE001 — logged and skipped, batch continues
-        source = f"SR {chunk['sr']} Art. {chunk['article']}"
+        source = f"{chunk['collection']} {chunk['number']} Art. {chunk['article']}"
         print(f"warning: skipping {source} ({chunk['lang']}): {error}", file=sys.stderr)
         return None
     return build_gold_row(chunk, parsed, index)

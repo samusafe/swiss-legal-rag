@@ -12,21 +12,23 @@ from ingestion.models import Chunk
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS chunks (
     id           bigserial PRIMARY KEY,
-    eli          text NOT NULL,
-    part         integer NOT NULL DEFAULT 0,
-    sr           text NOT NULL,
+    jurisdiction text NOT NULL,
+    collection   text NOT NULL,
+    number       text NOT NULL,
     lang         text NOT NULL,
     article      text NOT NULL,
+    part         integer NOT NULL DEFAULT 0,
     eid          text NOT NULL,
     heading      text,
     context      text,
+    text         text NOT NULL,
+    source_url   text NOT NULL,
     act_name     text NOT NULL,
     abbrev       text NOT NULL,
     version_date date NOT NULL,
-    text         text NOT NULL,
     embedding    vector(1024),
     tsv          tsvector,
-    UNIQUE (eli, part)
+    UNIQUE (jurisdiction, number, lang, eid, part)
 );
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv);
@@ -35,32 +37,40 @@ CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv);
 _TS_CONFIGS = {"de": "german", "fr": "french", "it": "italian"}
 
 _INSERT_SQL = """
-INSERT INTO chunks (eli, part, sr, lang, article, eid, heading, context,
-                    act_name, abbrev, version_date, text, tsv)
-VALUES (%(eli)s, %(part)s, %(sr)s, %(lang)s, %(article)s, %(eid)s, %(heading)s, %(context)s,
-        %(act_name)s, %(abbrev)s, %(version_date)s, %(text)s,
+INSERT INTO chunks (jurisdiction, collection, number, source_url, part, lang, article, eid,
+                    heading, context, act_name, abbrev, version_date, text, tsv)
+VALUES (%(jurisdiction)s, %(collection)s, %(number)s, %(source_url)s, %(part)s, %(lang)s,
+        %(article)s, %(eid)s, %(heading)s, %(context)s, %(act_name)s, %(abbrev)s,
+        %(version_date)s, %(text)s,
         to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s))
 """
-# No ON CONFLICT clause: upsert_chunks only reaches this INSERT for (eli, part)
-# keys it already confirmed are absent from the existing-rows lookup, and
-# _check_no_duplicate_keys already rejects duplicate keys within a batch, so
-# every insert here targets a fresh row.
+# No ON CONFLICT clause: upsert_chunks only reaches this INSERT for
+# (jurisdiction, number, lang, eid, part) keys it already confirmed are absent from the
+# existing-rows lookup, and _check_no_duplicate_keys already rejects duplicate keys within
+# a batch, so every insert here targets a fresh row.
 
 _UPDATE_SQL = """
 UPDATE chunks
-SET sr = %(sr)s, lang = %(lang)s, article = %(article)s, eid = %(eid)s,
+SET collection = %(collection)s, source_url = %(source_url)s, article = %(article)s,
     heading = %(heading)s, context = %(context)s, act_name = %(act_name)s,
     abbrev = %(abbrev)s, version_date = %(version_date)s, text = %(text)s,
     tsv = to_tsvector(%(ts_config)s::regconfig, coalesce(%(heading)s, '') || ' ' || %(text)s),
     embedding = NULL
-WHERE eli = %(eli)s AND part = %(part)s
+WHERE jurisdiction = %(jurisdiction)s AND number = %(number)s AND lang = %(lang)s
+  AND eid = %(eid)s AND part = %(part)s
 """
 # Only reached when the incoming text differs from what's stored, so the old
 # embedding is now stale — reset it to NULL so embed_pending re-embeds this row.
 
-_DELETE_SQL = "DELETE FROM chunks WHERE eli = %s AND part = %s"
+_DELETE_SQL = (
+    "DELETE FROM chunks WHERE jurisdiction = %s AND number = %s AND lang = %s "
+    "AND eid = %s AND part = %s"
+)
 
-_SELECT_EXISTING_SQL = "SELECT eli, part, sr, text FROM chunks WHERE sr = ANY(%s)"
+_SELECT_EXISTING_SQL = (
+    "SELECT jurisdiction, number, lang, eid, part, text FROM chunks "
+    "WHERE (jurisdiction || ':' || number) = ANY(%s)"
+)
 
 
 def ts_config(lang: str) -> str:
@@ -90,7 +100,7 @@ def embed_texts(
 
 
 def load_chunks(chunks_dir: Path) -> list[Chunk]:
-    files = sorted(chunks_dir.glob("*/*.jsonl"))
+    files = sorted(chunks_dir.glob("*/*/*.jsonl"))
     if not files:
         raise RuntimeError(f"no chunk files under {chunks_dir} — run `ingest parse` first")
     chunks: list[Chunk] = []
@@ -102,34 +112,42 @@ def load_chunks(chunks_dir: Path) -> list[Chunk]:
 
 
 def _check_no_duplicate_keys(chunks: list[Chunk]) -> None:
-    # upsert_chunks has no ON CONFLICT handling, so a duplicate (eli, part) key
-    # would otherwise surface as an opaque UNIQUE-violation from Postgres — fail
-    # loud here instead, and report every collision at once.
-    seen: dict[tuple[str, int], Chunk] = {}
+    # upsert_chunks has no ON CONFLICT handling, so a duplicate
+    # (jurisdiction, number, lang, eid, part) key would otherwise surface as an opaque
+    # UNIQUE-violation from Postgres — fail loud here instead, report every collision at once.
+    seen: dict[tuple[str, str, str, str, int], Chunk] = {}
     collisions: list[str] = []
     for chunk in chunks:
-        key = (chunk.eli, chunk.part or 0)
+        key = (chunk.jurisdiction, chunk.number, chunk.lang, chunk.eid, chunk.part or 0)
         prior = seen.get(key)
         if prior is not None:
             collisions.append(
-                f"eli={chunk.eli} part={key[1]}: SR {chunk.sr} {chunk.lang} "
+                f"source_url={chunk.source_url} part={key[4]}: "
+                f"{chunk.collection} {chunk.number} {chunk.lang} "
                 f"articles {prior.article} and {chunk.article}"
             )
         else:
             seen[key] = chunk
     if collisions:
         raise RuntimeError(
-            "duplicate chunk keys — duplicate source eIds in Fedlex XML:\n  "
+            "duplicate chunk keys — duplicate source eIds within a collection/number:\n  "
             + "\n  ".join(collisions)
         )
+
+
+def group_by_act(chunks: list[Chunk]) -> dict[tuple[str, str], list[Chunk]]:
+    groups: dict[tuple[str, str], list[Chunk]] = {}
+    for chunk in chunks:
+        groups.setdefault((chunk.jurisdiction, chunk.number), []).append(chunk)
+    return groups
 
 
 def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
     # Incremental upsert keyed by content hash — compared here as the raw text
     # itself (UTF-8), which is simpler and just as correct as hashing it. For
     # each act present in `chunks`:
-    #   - (eli, part) keys no longer in the incoming set are deleted (revoked
-    #     or renumbered articles), instead of an act-wide wipe;
+    #   - (jurisdiction, number, lang, eid, part) keys no longer in the incoming set are
+    #     deleted (revoked or renumbered articles), instead of an act-wide wipe;
     #   - keys present in both, whose text changed, are updated and their
     #     embedding is reset to NULL for embed_pending to re-embed;
     #   - keys present in both with identical text are left untouched, so an
@@ -137,36 +155,38 @@ def upsert_chunks(conn: psycopg.Connection, chunks: list[Chunk]) -> None:
     #   - keys with no existing row are inserted with embedding NULL.
     # All of this runs in one transaction, so a crash mid-run leaves the
     # previously committed state intact — same guarantee as before.
-    acts = list(dict.fromkeys(chunk.sr for chunk in chunks))
-    chunks_by_act: dict[str, list[Chunk]] = {}
-    for chunk in chunks:
-        chunks_by_act.setdefault(chunk.sr, []).append(chunk)
+    groups = group_by_act(chunks)
+    act_keys = [f"{jurisdiction}:{number}" for jurisdiction, number in groups]
 
     with conn.cursor() as cur:
-        cur.execute(_SELECT_EXISTING_SQL, (acts,))
-        existing: dict[tuple[str, int], tuple[str, str]] = {
-            (eli, part): (sr, text) for eli, part, sr, text in cur.fetchall()
+        cur.execute(_SELECT_EXISTING_SQL, (act_keys,))
+        existing: dict[tuple[str, str, str, str, int], str] = {
+            (jurisdiction, number, lang, eid, part): text
+            for jurisdiction, number, lang, eid, part, text in cur.fetchall()
         }
 
-        for sr, act_chunks in chunks_by_act.items():
-            incoming_keys = {(chunk.eli, chunk.part or 0) for chunk in act_chunks}
+        for (jurisdiction, number), act_chunks in groups.items():
+            incoming_keys = {
+                (chunk.jurisdiction, chunk.number, chunk.lang, chunk.eid, chunk.part or 0)
+                for chunk in act_chunks
+            }
             stale_keys = [
                 key
-                for key, (existing_sr, _existing_text) in existing.items()
-                if existing_sr == sr and key not in incoming_keys
+                for key in existing
+                if key[0] == jurisdiction and key[1] == number and key not in incoming_keys
             ]
-            for eli, part in stale_keys:
-                cur.execute(_DELETE_SQL, (eli, part))
+            for stale_key in stale_keys:
+                cur.execute(_DELETE_SQL, stale_key)
 
         for chunk in chunks:
-            key = (chunk.eli, chunk.part or 0)
+            key = (chunk.jurisdiction, chunk.number, chunk.lang, chunk.eid, chunk.part or 0)
             params = chunk.model_dump()
             params["part"] = chunk.part or 0
             params["ts_config"] = ts_config(chunk.lang)
-            prior = existing.get(key)
-            if prior is None:
+            prior_text = existing.get(key)
+            if prior_text is None:
                 cur.execute(_INSERT_SQL, params)
-            elif prior[1] != chunk.text:
+            elif prior_text != chunk.text:
                 cur.execute(_UPDATE_SQL, params)
             # else: text unchanged — leave row (and its embedding) untouched
     conn.commit()

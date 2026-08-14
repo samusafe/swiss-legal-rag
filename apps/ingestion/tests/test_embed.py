@@ -5,17 +5,24 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ingestion.embed import embed_texts, embedding_input, ts_config
+from ingestion.embed import embed_texts, embedding_input, group_by_act, ts_config
 from ingestion.models import Chunk
 from tests.conftest import make_client
 
 
 def chunk_for(context: str | None) -> Chunk:
     return Chunk(
-        sr="220", lang="de", article="335c", eid="art_335_c", context=context,
-        heading="nach Ablauf der Probezeit", text="Art. 335c\n1 Inhalt.",
-        eli="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
+        jurisdiction="CH", collection="SR", number="220", lang="de", article="335c",
+        eid="art_335_c", context=context, heading="nach Ablauf der Probezeit",
+        text="Art. 335c\n1 Inhalt.",
+        source_url="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
         act_name="Code of Obligations", abbrev="OR / CO", version_date=date(2026, 1, 1),
+    )
+
+
+def chunk_with(*, jurisdiction: str, collection: str, number: str) -> Chunk:
+    return chunk_for(None).model_copy(
+        update={"jurisdiction": jurisdiction, "collection": collection, "number": number}
     )
 
 
@@ -62,22 +69,18 @@ def test_embed_texts_fails_loud() -> None:
 def test_load_chunks_reports_all_collisions(tmp_path: Path) -> None:
     from ingestion.embed import load_chunks
 
-    lang_dir = tmp_path / "de"
-    lang_dir.mkdir()
-    # Create 4 chunks forming 2 colliding (eli, part) pairs
-    chunk1 = chunk_for(None).model_copy(
-        update={"article": "335", "eid": "art_335", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335"}
-    )
+    act_dir = tmp_path / "CH" / "220"
+    act_dir.mkdir(parents=True)
+    # Create 4 chunks forming 2 colliding (jurisdiction, number, lang, eid, part) pairs
+    chunk1 = chunk_for(None).model_copy(update={"article": "335", "eid": "art_335"})
     chunk2 = chunk_for(None).model_copy(
-        update={"article": "335a", "eid": "art_335", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335"}  # collision with chunk1
+        update={"article": "335a", "eid": "art_335"}  # collision with chunk1
     )
-    chunk3 = chunk_for(None).model_copy(
-        update={"article": "335b", "eid": "art_335b", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335b"}
-    )
+    chunk3 = chunk_for(None).model_copy(update={"article": "335b", "eid": "art_335b"})
     chunk4 = chunk_for(None).model_copy(
-        update={"article": "335c", "eid": "art_335b", "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335b"}  # collision with chunk3
+        update={"article": "335c", "eid": "art_335b"}  # collision with chunk3
     )
-    (lang_dir / "de.jsonl").write_text(
+    (act_dir / "de.jsonl").write_text(
         f"{chunk1.model_dump_json()}\n{chunk2.model_dump_json()}\n{chunk3.model_dump_json()}\n{chunk4.model_dump_json()}\n",
         encoding="utf-8"
     )
@@ -89,6 +92,14 @@ def test_load_chunks_reports_all_collisions(tmp_path: Path) -> None:
     assert message.count("articles") == 2  # both collisions listed, not just the first
 
 
+def test_group_by_act_keys_on_jurisdiction_and_number() -> None:
+    # two acts, same number, different jurisdictions must not collide
+    ch = chunk_with(jurisdiction="CH", collection="SR", number="700.1")
+    sg = chunk_with(jurisdiction="SG", collection="sGS", number="700.1")
+    groups = group_by_act([ch, sg])
+    assert set(groups) == {("CH", "700.1"), ("SG", "700.1")}
+
+
 def _mock_conn() -> tuple[MagicMock, MagicMock]:
     cursor = MagicMock()
     conn = MagicMock()
@@ -96,12 +107,16 @@ def _mock_conn() -> tuple[MagicMock, MagicMock]:
     return conn, cursor
 
 
+def _existing_row(chunk: Chunk, text: str) -> tuple[str, str, str, str, int, str]:
+    return (chunk.jurisdiction, chunk.number, chunk.lang, chunk.eid, chunk.part or 0, text)
+
+
 def test_upsert_chunks_leaves_unchanged_row_untouched() -> None:
     from ingestion.embed import upsert_chunks
 
     conn, cursor = _mock_conn()
     chunk = chunk_for(None)
-    cursor.fetchall.return_value = [(chunk.eli, 0, chunk.sr, chunk.text)]
+    cursor.fetchall.return_value = [_existing_row(chunk, chunk.text)]
 
     upsert_chunks(conn, [chunk])
 
@@ -120,7 +135,7 @@ def test_upsert_chunks_updates_changed_text_and_resets_embedding() -> None:
 
     conn, cursor = _mock_conn()
     chunk = chunk_for(None).model_copy(update={"text": "Art. 335c\n1 Amended."})
-    cursor.fetchall.return_value = [(chunk.eli, 0, chunk.sr, "Art. 335c\n1 Inhalt.")]
+    cursor.fetchall.return_value = [_existing_row(chunk, "Art. 335c\n1 Inhalt.")]
 
     upsert_chunks(conn, [chunk])
 
@@ -131,7 +146,9 @@ def test_upsert_chunks_updates_changed_text_and_resets_embedding() -> None:
     assert len(update_calls) == 1
     sql, params = update_calls[0].args
     assert "embedding = NULL" in sql
-    assert params["eli"] == chunk.eli
+    assert params["jurisdiction"] == chunk.jurisdiction
+    assert params["number"] == chunk.number
+    assert params["eid"] == chunk.eid
     assert params["part"] == 0
     assert params["text"] == chunk.text
     conn.commit.assert_called_once()
@@ -142,10 +159,10 @@ def test_upsert_chunks_deletes_vanished_key_only() -> None:
 
     conn, cursor = _mock_conn()
     kept = chunk_for(None)
-    vanished_eli = kept.eli.replace("art_335_c", "art_336")
+    vanished = kept.model_copy(update={"article": "336", "eid": "art_336"})
     cursor.fetchall.return_value = [
-        (kept.eli, 0, kept.sr, kept.text),
-        (vanished_eli, 0, kept.sr, "Art. 336\n1 Repealed content."),
+        _existing_row(kept, kept.text),
+        _existing_row(vanished, "Art. 336\n1 Repealed content."),
     ]
 
     upsert_chunks(conn, [kept])
@@ -156,7 +173,7 @@ def test_upsert_chunks_deletes_vanished_key_only() -> None:
     ]
     assert len(delete_calls) == 1
     sql, params = delete_calls[0].args
-    assert params == (vanished_eli, 0)
+    assert params == (vanished.jurisdiction, vanished.number, vanished.lang, vanished.eid, 0)
     conn.commit.assert_called_once()
 
 
@@ -176,7 +193,9 @@ def test_upsert_chunks_inserts_new_row() -> None:
     assert len(insert_calls) == 1
     sql, params = insert_calls[0].args
     assert "embedding" not in sql  # column omitted entirely -> stays NULL
-    assert params["eli"] == chunk.eli
+    assert params["jurisdiction"] == chunk.jurisdiction
+    assert params["number"] == chunk.number
+    assert params["eid"] == chunk.eid
     assert params["part"] == 0
     conn.commit.assert_called_once()
 
@@ -191,24 +210,23 @@ def test_upsert_chunks_selective_changes_in_one_transaction() -> None:
         update={
             "article": "335a",
             "eid": "art_335a",
-            "eli": unchanged.eli.replace("335_c", "335_a"),
             "text": "Art. 335a\n1 New wording.",
         }
     )
     new_chunk = chunk_for(None).model_copy(
         update={
-            "sr": "221",
+            "number": "221",
             "article": "1",
             "eid": "art_1",
-            "eli": "https://www.fedlex.admin.ch/eli/cc/other/de#art_1",
+            "source_url": "https://www.fedlex.admin.ch/eli/cc/other/de#art_1",
         }
     )
-    vanished_eli = unchanged.eli.replace("335_c", "336")
+    vanished = unchanged.model_copy(update={"article": "336", "eid": "art_336"})
 
     cursor.fetchall.return_value = [
-        (unchanged.eli, 0, unchanged.sr, unchanged.text),
-        (changed.eli, 0, changed.sr, "Art. 335a\n1 Old wording."),
-        (vanished_eli, 0, unchanged.sr, "Art. 336\n1 Repealed."),
+        _existing_row(unchanged, unchanged.text),
+        _existing_row(changed, "Art. 335a\n1 Old wording."),
+        _existing_row(vanished, "Art. 336\n1 Repealed."),
     ]
 
     upsert_chunks(conn, [unchanged, changed, new_chunk])
@@ -227,6 +245,4 @@ def test_upsert_chunks_selective_changes_in_one_transaction() -> None:
     conn.commit.assert_called_once()
 
     select_call = calls[select_idx]
-    assert set(select_call.args[1][0]) == {"220", "221"}
-
-
+    assert set(select_call.args[1][0]) == {"CH:220", "CH:221"}

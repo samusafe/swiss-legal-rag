@@ -13,14 +13,17 @@ def test_search_posts_query_and_returns_results_list():
         assert body == {"q": "frage", "lang": "de", "k": 5}
         return httpx.Response(
             200,
-            json={"results": [{"sr": "220", "article": "1"}], "took_ms": {"embed": 1}},
+            json={
+                "results": [{"collection": "SR", "number": "220", "article": "1"}],
+                "took_ms": {"embed": 1},
+            },
         )
 
     transport = httpx.MockTransport(handler)
     with httpx.Client(transport=transport) as http_client:
         results = search(http_client, "http://test", "frage", "de", 5)
 
-    assert results == [{"sr": "220", "article": "1"}]
+    assert results == [{"collection": "SR", "number": "220", "article": "1"}]
 
 
 def test_search_raises_on_non_200():
@@ -41,14 +44,16 @@ def _sse_body(events: list[tuple[str, dict]]) -> bytes:
 def test_chat_posts_question_and_assembles_answer_and_citations():
     citation = {
         "raw": "[SR 220 Art. 1]",
-        "sr": "220",
+        "collection": "SR",
+        "number": "220",
         "article": "1",
-        "eli": "https://example.org/eli",
+        "citation_label": "SR 220 Art. 1",
+        "source_url": "https://example.org/source",
         "resolved": True,
     }
     body = _sse_body(
         [
-            ("sources", {"sources": [{"sr": "220"}]}),
+            ("sources", {"sources": [{"collection": "SR", "number": "220"}]}),
             ("token", {"delta": "Hello "}),
             ("token", {"delta": "world"}),
             ("done", {"citations": [citation], "model": "m", "duration_ms": 5}),
@@ -72,14 +77,16 @@ def test_chat_posts_question_and_assembles_answer_and_citations():
 def test_chat_tolerates_unknown_thinking_event_between_sources_and_token():
     citation = {
         "raw": "[SR 220 Art. 1]",
-        "sr": "220",
+        "collection": "SR",
+        "number": "220",
         "article": "1",
-        "eli": "https://example.org/eli",
+        "citation_label": "SR 220 Art. 1",
+        "source_url": "https://example.org/source",
         "resolved": True,
     }
     body = _sse_body(
         [
-            ("sources", {"sources": [{"sr": "220"}]}),
+            ("sources", {"sources": [{"collection": "SR", "number": "220"}]}),
             ("thinking", {"delta": "hmm, checking the article..."}),
             ("token", {"delta": "Hello "}),
             ("token", {"delta": "world"}),
@@ -196,3 +203,53 @@ def test_chat_omits_x_api_key_header_when_not_provided():
     transport = httpx.MockTransport(handler)
     with httpx.Client(transport=transport) as http_client:
         chat(http_client, "http://test", "frage", "de", 5)
+
+
+def test_search_omits_canton_from_body_when_not_provided():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body == {"q": "frage", "lang": "de", "k": 5}
+        assert "canton" not in body
+        return httpx.Response(200, json={"results": [], "took_ms": {"embed": 1}})
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        search(http_client, "http://test", "frage", "de", 5)
+
+
+def test_search_sends_canton_in_body_when_provided():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body == {"q": "frage", "lang": "de", "k": 5, "canton": "SG"}
+        return httpx.Response(200, json={"results": [], "took_ms": {"embed": 1}})
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        search(http_client, "http://test", "frage", "de", 5, canton="SG")
+
+
+def test_chat_omits_canton_from_body_when_not_provided():
+    body = _sse_body([("sources", {"sources": []}), ("done", {"citations": []})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body_json = json.loads(request.content)
+        assert body_json == {"question": "frage", "lang": "de", "k": 5}
+        assert "canton" not in body_json
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        chat(http_client, "http://test", "frage", "de", 5)
+
+
+def test_chat_sends_canton_in_body_when_provided():
+    body = _sse_body([("sources", {"sources": []}), ("done", {"citations": []})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body_json = json.loads(request.content)
+        assert body_json == {"question": "frage", "lang": "de", "k": 5, "canton": "BE"}
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        chat(http_client, "http://test", "frage", "de", 5, canton="BE")

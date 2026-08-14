@@ -123,8 +123,8 @@ def test_search_returns_503_when_ollama_unreachable() -> None:
 
     deps = SearchDeps(
         embed=failing_embed,
-        dense=lambda vector, k: [],
-        fts=lambda q, lang, k: [],
+        dense=lambda vector, k, jur: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     with _client(deps) as client:
@@ -135,13 +135,13 @@ def test_search_returns_503_when_ollama_unreachable() -> None:
 
 
 def test_search_returns_503_when_db_unavailable() -> None:
-    def failing_dense(vector: list[float], k: int) -> list:
+    def failing_dense(vector: list[float], k: int, jur: list[str]) -> list:
         raise psycopg.OperationalError("connection refused")
 
     deps = SearchDeps(
         embed=lambda text: [0.0] * 1024,
         dense=failing_dense,
-        fts=lambda q, lang, k: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     with _client(deps) as client:
@@ -151,14 +151,23 @@ def test_search_returns_503_when_db_unavailable() -> None:
     assert "database unavailable" in response.json()["detail"]
 
 
+def test_search_rejects_unknown_canton() -> None:
+    with _client(deps_with([])) as client:
+        response = client.post(
+            "/search", json={"q": "x", "lang": "de", "canton": "XX"}
+        )
+
+    assert response.status_code == 422
+
+
 def test_search_reconnects_and_recovers_on_next_request(monkeypatch) -> None:
-    def failing_dense(vector: list[float], k: int) -> list:
+    def failing_dense(vector: list[float], k: int, jur: list[str]) -> list:
         raise psycopg.OperationalError("connection refused")
 
     dead = SearchDeps(
         embed=lambda text: [0.0] * 1024,
         dense=failing_dense,
-        fts=lambda q, lang, k: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     app = create_app()
@@ -203,15 +212,19 @@ def test_chat_streams_sources_tokens_done(monkeypatch) -> None:
     assert [name for name, _ in events] == ["sources", "token", "token", "done"]
     sources = events[0][1]["sources"]
     assert [s["article"] for s in sources] == ["3", "2", "1"]
-    assert {"sr", "article", "heading", "eli", "lang", "score"} <= set(sources[0])
+    assert {
+        "jurisdiction", "collection", "number", "article", "heading",
+        "source_url", "lang", "score", "citation_label",
+    } <= set(sources[0])
     done = events[-1][1]
     assert done["citations"] == [
         {
             "raw": "[SR 220 Art. 3]",
             "label": "SR 220 Art. 3",
-            "sr": "220",
+            "collection": "SR",
+            "number": "220",
             "article": "3",
-            "eli": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_3",
+            "source_url": "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_3",
             "resolved": True,
         }
     ]
@@ -279,7 +292,7 @@ def test_chat_without_lang_detects_language_for_fts_and_prompt(monkeypatch) -> N
 
 
 def test_chat_without_lang_falls_back_to_dense_only_when_undetected_lang(monkeypatch) -> None:
-    def exploding_fts(q: str, lang: str, k: int) -> list:
+    def exploding_fts(q: str, lang: str, k: int, jur: list[str]) -> list:
         raise AssertionError("fts must not be called for an unsupported detected language")
 
     captured_messages: list = []
@@ -296,7 +309,8 @@ def test_chat_without_lang_falls_back_to_dense_only_when_undetected_lang(monkeyp
     monkeypatch.setattr("retrieval.app.stream_chat", fake_stream)
     deps = SearchDeps(
         embed=lambda text: [0.0] * 1024,
-        dense=lambda vector, k: [A],  # non-empty: exercises build_messages, not the refusal path
+        # non-empty: exercises build_messages, not the refusal path
+        dense=lambda vector, k, jur: [A],
         fts=exploding_fts,
         rerank=lambda q, texts: [0.5],
     )
@@ -316,8 +330,8 @@ def test_chat_refuses_without_calling_ollama_when_no_sources_retrieved(monkeypat
     monkeypatch.setattr("retrieval.app.stream_chat", exploding_stream)
     deps = SearchDeps(
         embed=lambda text: [0.0] * 1024,
-        dense=lambda vector, k: [],
-        fts=lambda q, lang, k: [],
+        dense=lambda vector, k, jur: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     app = create_app()
@@ -344,8 +358,8 @@ def test_chat_returns_503_when_retrieval_fails() -> None:
 
     deps = SearchDeps(
         embed=failing_embed,
-        dense=lambda vector, k: [],
-        fts=lambda q, lang, k: [],
+        dense=lambda vector, k, jur: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     with _client(deps) as client:
@@ -525,9 +539,10 @@ def test_rate_limit_does_not_apply_to_get_endpoints(monkeypatch) -> None:
 
 def _chunk_row(part: int, text: str, lang: str = "fr") -> ChunkRow:
     return ChunkRow(
-        id=part + 1, sr="220", lang=lang, article="335b", part=part or None,
+        id=part + 1, jurisdiction="CH", collection="SR", number="220", lang=lang,
+        article="335b", part=part or None,
         eid="art_335_b", heading="During the trial period", context=None, text=text,
-        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}#art_335_b",
+        source_url=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}#art_335_b",
         act_name="Code of Obligations", abbrev="CO", version_date=date(2026, 1, 1),
     )
 
@@ -536,28 +551,57 @@ def test_article_returns_ordered_parts() -> None:
     app = create_app()
     app.state.deps = deps_with([])
     app.state.article_deps = ArticleDeps(
-        rows=lambda sr, article, lang: [_chunk_row(1, "part one"), _chunk_row(2, "part two")],
-        langs=lambda sr, article: ["de", "fr", "it"],
+        rows=lambda jurisdiction, number, article, lang: [
+            _chunk_row(1, "part one"), _chunk_row(2, "part two")
+        ],
+        langs=lambda jurisdiction, number, article: ["de", "fr", "it"],
     )
     with TestClient(app) as client:
-        response = client.get("/article", params={"sr": "220", "article": "335b", "lang": "fr"})
+        response = client.get(
+            "/article",
+            params={"jurisdiction": "CH", "number": "220", "article": "335b", "lang": "fr"},
+        )
 
     assert response.status_code == 200
     body = response.json()
     assert body["texts"] == ["part one", "part two"]
     assert body["available_langs"] == ["de", "fr", "it"]
     assert body["act_name"] == "Code of Obligations"
-    assert body["eli"].endswith("#art_335_b")
+    assert body["source_url"].endswith("#art_335_b")
+    assert body["citation_label"] == "SR 220 Art. 335b"
+
+
+def test_article_happy_path_with_jurisdiction_and_number_params() -> None:
+    app = create_app()
+    app.state.deps = deps_with([])
+    app.state.article_deps = ArticleDeps(
+        rows=lambda jurisdiction, number, article, lang: [_chunk_row(0, "text", lang="de")],
+        langs=lambda jurisdiction, number, article: ["de"],
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/article",
+            params={"jurisdiction": "CH", "number": "220", "article": "335c", "lang": "de"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jurisdiction"] == "CH"
+    assert body["number"] == "220"
+    assert body["texts"] == ["text"]
 
 
 def test_article_404_when_missing_everywhere() -> None:
     app = create_app()
     app.state.deps = deps_with([])
     app.state.article_deps = ArticleDeps(
-        rows=lambda sr, article, lang: [], langs=lambda sr, article: [],
+        rows=lambda jurisdiction, number, article, lang: [],
+        langs=lambda jurisdiction, number, article: [],
     )
     with TestClient(app) as client:
-        response = client.get("/article", params={"sr": "999", "article": "1", "lang": "de"})
+        response = client.get(
+            "/article", params={"jurisdiction": "CH", "number": "999", "article": "1", "lang": "de"}
+        )
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"]
@@ -567,10 +611,14 @@ def test_article_404_names_other_langs() -> None:
     app = create_app()
     app.state.deps = deps_with([])
     app.state.article_deps = ArticleDeps(
-        rows=lambda sr, article, lang: [], langs=lambda sr, article: ["de", "it"],
+        rows=lambda jurisdiction, number, article, lang: [],
+        langs=lambda jurisdiction, number, article: ["de", "it"],
     )
     with TestClient(app) as client:
-        response = client.get("/article", params={"sr": "220", "article": "335b", "lang": "fr"})
+        response = client.get(
+            "/article",
+            params={"jurisdiction": "CH", "number": "220", "article": "335b", "lang": "fr"},
+        )
 
     assert response.status_code == 404
     assert "de, it" in response.json()["detail"]
@@ -580,7 +628,9 @@ def test_article_rejects_bad_lang() -> None:
     app = create_app()
     app.state.deps = deps_with([])
     with TestClient(app) as client:
-        response = client.get("/article", params={"sr": "220", "article": "1", "lang": "en"})
+        response = client.get(
+            "/article", params={"jurisdiction": "CH", "number": "220", "article": "1", "lang": "en"}
+        )
 
     assert response.status_code == 422
 
@@ -614,13 +664,13 @@ def test_access_log_skips_health(capfd) -> None:
 
 
 def test_access_log_records_error_status(capfd) -> None:
-    def failing_dense(vector: list[float], k: int) -> list:
+    def failing_dense(vector: list[float], k: int, jur: list[str]) -> list:
         raise psycopg.OperationalError("connection refused")
 
     deps = SearchDeps(
         embed=lambda text: [0.0] * 1024,
         dense=failing_dense,
-        fts=lambda q, lang, k: [],
+        fts=lambda q, lang, k, jur: [],
         rerank=lambda q, texts: [],
     )
     with _client(deps) as client:
@@ -636,16 +686,18 @@ def test_access_log_records_500_for_unhandled_exception(capfd) -> None:
     # rows() dep is never converted to an HTTPException — it propagates past
     # ExceptionMiddleware into access_log's `except Exception` branch, which
     # logs status 500 and re-raises (no X-Request-Id gets set on this path).
-    def exploding_rows(sr: str, article: str, lang: str) -> list:
+    def exploding_rows(jurisdiction: str, number: str, article: str, lang: str) -> list:
         raise RuntimeError("boom")
 
     app = create_app()
     app.state.deps = deps_with([])
     app.state.article_deps = ArticleDeps(
-        rows=exploding_rows, langs=lambda sr, article: ["de"],
+        rows=exploding_rows, langs=lambda jurisdiction, number, article: ["de"],
     )
     with TestClient(app, raise_server_exceptions=False) as client:
-        response = client.get("/article", params={"sr": "220", "article": "1", "lang": "de"})
+        response = client.get(
+            "/article", params={"jurisdiction": "CH", "number": "220", "article": "1", "lang": "de"}
+        )
 
     assert response.status_code == 500
     assert "X-Request-Id" not in response.headers

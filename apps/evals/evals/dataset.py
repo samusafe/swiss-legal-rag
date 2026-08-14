@@ -85,7 +85,7 @@ def _parse_row(data: dict, lineno: int, seen_ids: dict[str, int]) -> GoldQuestio
     for source in data["expected_sources"]:
         if not _SOURCE_RE.match(source.strip()):
             raise ValueError(
-                f'expected_sources entry {source!r} must match "SR <nr> Art. <x>"'
+                f'expected_sources entry {source!r} must match "<collection> <nr> Art. <x>"'
             )
 
     row_id = data["id"]

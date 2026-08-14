@@ -12,19 +12,23 @@ CANDIDATES = 20
 @dataclass(frozen=True)
 class SearchDeps:
     embed: Callable[[str], list[float]]
-    dense: Callable[[list[float], int], list[ChunkRow]]
-    fts: Callable[[str, str, int], list[ChunkRow]]
+    dense: Callable[[list[float], int, list[str]], list[ChunkRow]]
+    fts: Callable[[str, str, int, list[str]], list[ChunkRow]]
     rerank: Callable[[str, list[str]], list[float]]
 
 
-def run_search(deps: SearchDeps, q: str, k: int, lang: str | None) -> SearchResponse:
+def run_search(
+    deps: SearchDeps, q: str, k: int, lang: str | None, canton: str | None = None
+) -> SearchResponse:
     # lang=None skips the FTS arm entirely (dense + rerank only) — used by /chat
     # when the detected question language isn't one FTS has a config for.
+    # Federal law (CH) is always in scope; a canton adds its cantonal corpus on top.
+    jurisdictions = ["CH"] + ([canton] if canton else [])
     t0 = time.perf_counter()
     query_vector = deps.embed(q)
     t1 = time.perf_counter()
-    dense_rows = deps.dense(query_vector, CANDIDATES)
-    fts_rows = deps.fts(q, lang, CANDIDATES) if lang is not None else []
+    dense_rows = deps.dense(query_vector, CANDIDATES, jurisdictions)
+    fts_rows = deps.fts(q, lang, CANDIDATES, jurisdictions) if lang is not None else []
     by_id = {row.id: row for row in [*dense_rows, *fts_rows]}
     fused_ids = rrf([[r.id for r in dense_rows], [r.id for r in fts_rows]])[:CANDIDATES]
     candidates = [by_id[i] for i in fused_ids]

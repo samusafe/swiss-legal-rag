@@ -3,8 +3,15 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { useIngest } from "../hooks/useIngest";
-import { setLang } from "../i18n";
-import { exportConversation, firstSelectionKey, isLang, SettingsModal } from "./SettingsModal";
+import { setLang, t } from "../i18n";
+import {
+  cantonDescription,
+  exportConversation,
+  firstSelectionKey,
+  isLang,
+  jurisdictionFromSelection,
+  SettingsModal,
+} from "./SettingsModal";
 
 vi.mock("../lib/db", () => ({
   listConversations: vi.fn(),
@@ -32,7 +39,9 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import * as audit from "../lib/audit";
 import { listConversations, getMessages } from "../lib/db";
+import { CANTONS, COVERED_CANTONS, getJurisdiction, setJurisdiction } from "../lib/jurisdiction";
 
 const listConversationsMock = vi.mocked(listConversations);
 const getMessagesMock = vi.mocked(getMessages);
@@ -179,6 +188,20 @@ describe("SettingsModal", () => {
     expect(within(select).getByText("Português")).toBeInTheDocument();
   });
 
+  it("lists the jurisdiction options as None plus all 26 cantons, defaulting to None", () => {
+    renderModal();
+
+    const select = nativeSelect("Jurisdiction");
+    expect(select.value).toBe("none");
+    expect([...select.options].map((option) => option.value)).toEqual([
+      "",
+      "none",
+      ...CANTONS.map((c) => c.code),
+    ]);
+    expect(select.options).toHaveLength(28); // native's own blank option + None + 26 cantons
+    expect(within(select).getByText("St. Gallen")).toBeInTheDocument();
+  });
+
   it("persists the notifications toggle and defaults it on", () => {
     renderModal();
 
@@ -256,6 +279,55 @@ describe("isLang", () => {
     expect(isLang("d")).toBe(false);
     expect(isLang("xx")).toBe(false);
     expect(isLang("")).toBe(false);
+  });
+});
+
+describe("jurisdictionFromSelection", () => {
+  it("maps the 'none' key to no canton", () => {
+    expect(jurisdictionFromSelection("none")).toEqual({ canton: null, commune: null });
+  });
+
+  it("maps a canton code straight through", () => {
+    expect(jurisdictionFromSelection("SG")).toEqual({ canton: "SG", commune: null });
+  });
+});
+
+describe("cantonDescription", () => {
+  beforeEach(() => {
+    setLang("en");
+  });
+
+  it("returns undefined for a covered canton (no badge)", () => {
+    for (const code of COVERED_CANTONS) {
+      expect(cantonDescription(code)).toBeUndefined();
+    }
+  });
+
+  it("returns the 'federal only' badge text for an uncovered canton", () => {
+    expect(cantonDescription("ZH")).toBe(t("settings.jurisdictionFederalOnly"));
+  });
+});
+
+describe("jurisdiction persistence and auditing", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("persists a selected canton through the real setJurisdiction/getJurisdiction round trip", () => {
+    setJurisdiction(jurisdictionFromSelection("SG"));
+
+    expect(getJurisdiction()).toEqual({ canton: "SG", commune: null });
+  });
+
+  it("logs the settings.jurisdiction audit event as part of that same call", () => {
+    const logAuditSpy = vi.spyOn(audit, "logAudit");
+
+    setJurisdiction(jurisdictionFromSelection("SG"));
+
+    expect(logAuditSpy).toHaveBeenCalledWith(
+      "settings.jurisdiction",
+      expect.objectContaining({ to: { canton: "SG", commune: null } }),
+    );
   });
 });
 

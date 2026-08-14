@@ -213,6 +213,35 @@ def test_permissive_mode_raises_when_no_valid_rows_remain(tmp_path):
         load_gold(path, permissive=True)
 
 
+def test_loads_cantonal_source_row(tmp_path):
+    # Cantonal citation grammar: "<collection> <number> Art. <article>", e.g.
+    # "sGS 811.1 Art. 2" for the canton of St. Gallen. Uses a unit-test-only
+    # fixture row -- real cantonal gold rows land in gold.seed.jsonl only
+    # after the first SG/BE ingest (see the header comment there).
+    data = {
+        "id": "t-sg-01",
+        "lang": "de",
+        "question": "Bis wann muss die Steuererklärung im Kanton St. Gallen eingereicht werden?",
+        "expected_sources": ["sGS 811.1 Art. 2"],
+        "expected_keywords": ["Steuererklärung", "Frist"],
+        "must_refuse": False,
+    }
+    path = _write(tmp_path, json.dumps(data) + "\n")
+
+    questions = load_gold(path)
+
+    assert questions == [
+        GoldQuestion(
+            id="t-sg-01",
+            lang="de",
+            question="Bis wann muss die Steuererklärung im Kanton St. Gallen eingereicht werden?",
+            expected_sources=("sGS 811.1 Art. 2",),
+            expected_keywords=("Steuererklärung", "Frist"),
+            must_refuse=False,
+        )
+    ]
+
+
 def test_strict_mode_still_raises_on_first_bad_row_by_default(tmp_path):
     good = json.dumps(_row(id="good"))
     bad = json.dumps(_row(id="bad", lang="en"))

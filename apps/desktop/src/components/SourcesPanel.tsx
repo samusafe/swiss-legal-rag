@@ -101,20 +101,21 @@ export function SourcesPanel({
         // any source in this list anyway.
         const cited = citations.some(
           (citation) =>
-            citation.sr === source.sr &&
+            citation.collection === source.collection &&
+            citation.number === source.number &&
             citation.article.toLowerCase() === source.article.toLowerCase(),
         );
         return (
           <button
-            key={`${source.sr}-${source.article}-${source.lang}`}
+            key={`${source.jurisdiction}-${source.number}-${source.article}-${source.lang}`}
             type="button"
-            aria-label={`SR ${source.sr} Art. ${source.article}`}
+            aria-label={source.citationLabel}
             onClick={() => onOpenArticle(deduped, i)}
             className="flex cursor-pointer flex-col gap-1.5 rounded-sm border border-divider bg-content1 p-3 text-left text-foreground transition-colors hover:border-primary hover:bg-content2"
           >
             <div className="flex items-center gap-2">
               <span className="font-medium">
-                SR {source.sr} · Art. {source.article}
+                {source.collection} {source.number} · Art. {source.article}
               </span>
               <Chip size="sm" variant="flat">
                 {source.lang.toUpperCase()}

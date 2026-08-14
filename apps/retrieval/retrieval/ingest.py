@@ -71,10 +71,20 @@ def _manifest_entries(repo_root: Path) -> list[dict]:
 
 def _chunk_lines(repo_root: Path) -> int:
     total = 0
-    for path in sorted((repo_root / "data" / "chunks").glob("*/*.jsonl")):
+    # data/chunks/<jurisdiction>/<number>/<lang>.jsonl
+    for path in sorted((repo_root / "data" / "chunks").glob("*/*/*.jsonl")):
         with path.open(encoding="utf-8") as handle:
             total += sum(1 for line in handle if line.strip())
     return total
+
+
+def _raw_file_count(repo_root: Path) -> int:
+    raw_dir = repo_root / "data" / "raw"
+    # fedlex XML: <jurisdiction>/<number>/<lang>.xml
+    fedlex = len(list(raw_dir.glob("*/*/*.xml")))
+    # lexwork JSON: <jurisdiction>/<number>.<lang>.json
+    lexwork = len(list(raw_dir.glob("*/*.json")))
+    return fedlex + lexwork
 
 
 def ingest_status(state: IngestState, database_url: str, repo_root: Path = REPO_ROOT) -> dict:
@@ -85,7 +95,7 @@ def ingest_status(state: IngestState, database_url: str, repo_root: Path = REPO_
     return {
         "running": running,
         "phase": phase,
-        "acts": len({entry["sr"] for entry in entries}),
+        "acts": len({(entry["jurisdiction"], entry["number"]) for entry in entries}),
         "chunks_total": _chunk_lines(repo_root),
         "chunks_embedded": embedded_count(database_url),
     }
@@ -100,9 +110,9 @@ def phase_progress(
         # manifest shows as full — the resolve step only lasts ~30-60 s.
         return entries, entries
     if phase == "fetch":
-        return len(list((repo_root / "data" / "raw").glob("*/*.xml"))), entries
+        return _raw_file_count(repo_root), entries
     if phase == "parse":
-        return len(list((repo_root / "data" / "chunks").glob("*/*.jsonl"))), entries
+        return len(list((repo_root / "data" / "chunks").glob("*/*/*.jsonl"))), entries
     if phase == "embed":
         return embedded_count(database_url), _chunk_lines(repo_root)
     raise ValueError(f"unknown phase: {phase}")

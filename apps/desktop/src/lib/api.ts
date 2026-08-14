@@ -1,22 +1,77 @@
 import { createSseParser, type SseFrame } from "./sse";
 import { logAudit } from "./audit";
+import { getJurisdiction } from "./jurisdiction";
 
 export interface Source {
-  sr: string;
+  jurisdiction: string;
+  collection: string;
+  number: string;
   article: string;
   heading: string | null;
-  eli: string;
+  sourceUrl: string;
   lang: string;
   score: number;
+  citationLabel: string;
 }
 
 export interface Citation {
   raw: string;
   label: string;
-  sr: string;
+  collection: string;
+  number: string;
   article: string;
-  eli: string | null;
+  sourceUrl: string | null;
   resolved: boolean;
+}
+
+// Backend boundary shapes (snake_case, over the wire) for the SSE payloads
+// mapped below — kept next to their camelCase counterparts above.
+interface WireSource {
+  jurisdiction: string;
+  collection: string;
+  number: string;
+  article: string;
+  heading: string | null;
+  source_url: string;
+  lang: string;
+  score: number;
+  citation_label: string;
+}
+
+interface WireCitation {
+  raw: string;
+  label: string;
+  collection: string;
+  number: string;
+  article: string;
+  source_url: string | null;
+  resolved: boolean;
+}
+
+function fromWireSource(source: WireSource): Source {
+  return {
+    jurisdiction: source.jurisdiction,
+    collection: source.collection,
+    number: source.number,
+    article: source.article,
+    heading: source.heading,
+    sourceUrl: source.source_url,
+    lang: source.lang,
+    score: source.score,
+    citationLabel: source.citation_label,
+  };
+}
+
+function fromWireCitation(citation: WireCitation): Citation {
+  return {
+    raw: citation.raw,
+    label: citation.label,
+    collection: citation.collection,
+    number: citation.number,
+    article: citation.article,
+    sourceUrl: citation.source_url,
+    resolved: citation.resolved,
+  };
 }
 
 export type ChatEvent =
@@ -117,17 +172,23 @@ async function* sseEvents<T>(
 function toChatEvent(frame: SseFrame): ChatEvent {
   const data: unknown = JSON.parse(frame.data);
   switch (frame.event) {
-    case "sources":
-      return { type: "sources", sources: (data as { sources: Source[] }).sources };
+    case "sources": {
+      const sources = (data as { sources: WireSource[] }).sources;
+      return { type: "sources", sources: sources.map(fromWireSource) };
+    }
     case "thinking":
       return { type: "thinking", delta: (data as { delta: string }).delta };
     case "token":
       return { type: "token", delta: (data as { delta: string }).delta };
     case "done": {
-      const done = data as { citations: Citation[]; model: string; duration_ms: number };
+      const done = data as {
+        citations: WireCitation[];
+        model: string;
+        duration_ms: number;
+      };
       return {
         type: "done",
-        citations: done.citations,
+        citations: done.citations.map(fromWireCitation),
         model: done.model,
         durationMs: done.duration_ms,
       };
@@ -146,7 +207,7 @@ export async function* postChat(
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, canton: getJurisdiction().canton }),
     signal,
   });
   if (!response.ok) await failResponse("/chat", response);
@@ -159,14 +220,17 @@ export async function* postChat(
 export type SearchLang = "de" | "fr" | "it";
 
 export interface SearchResult {
-  sr: string;
+  jurisdiction: string;
+  collection: string;
+  number: string;
   article: string;
   heading: string | null;
   context: string | null;
   text: string;
-  eli: string;
+  sourceUrl: string;
   actName: string;
   score: number;
+  citationLabel: string;
 }
 
 export async function search(
@@ -178,55 +242,65 @@ export async function search(
   const response = await fetch(`${API_BASE_URL}/search`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ q, k, lang }),
+    body: JSON.stringify({ q, k, lang, canton: getJurisdiction().canton }),
     signal,
   });
   if (!response.ok) await failResponse("/search", response);
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
     results: Array<{
-      sr: string;
+      jurisdiction: string;
+      collection: string;
+      number: string;
       article: string;
       heading: string | null;
       context: string | null;
       text: string;
-      eli: string;
+      source_url: string;
       act_name: string;
       score: number;
+      citation_label: string;
     }>;
   };
   return data.results.map((r) => ({
-    sr: r.sr,
+    jurisdiction: r.jurisdiction,
+    collection: r.collection,
+    number: r.number,
     article: r.article,
     heading: r.heading,
     context: r.context,
     text: r.text,
-    eli: r.eli,
+    sourceUrl: r.source_url,
     actName: r.act_name,
     score: r.score,
+    citationLabel: r.citation_label,
   }));
 }
 
 export interface Article {
-  sr: string;
+  jurisdiction: string;
+  collection: string;
+  number: string;
   article: string;
   lang: string;
   heading: string | null;
   actName: string;
   abbrev: string;
-  eli: string;
+  sourceUrl: string;
   versionDate: string;
   texts: string[];
   availableLangs: string[];
+  citationLabel: string;
 }
 
 export async function fetchArticle(
-  sr: string,
+  jurisdiction: string,
+  number: string,
   article: string,
   lang: SearchLang,
   signal?: AbortSignal,
 ): Promise<Article> {
-  const params = new URLSearchParams({ sr, article, lang });
+  const params = new URLSearchParams({ jurisdiction, number, article, lang });
   const response = await fetch(`${API_BASE_URL}/article?${params.toString()}`, {
     headers: authHeaders(),
     signal,
@@ -234,28 +308,34 @@ export async function fetchArticle(
   if (!response.ok) await failResponse("/article", response);
   // Backend boundary cast: payload shape owned and tested by apps/retrieval.
   const data = (await response.json()) as {
-    sr: string;
+    jurisdiction: string;
+    collection: string;
+    number: string;
     article: string;
     lang: string;
     heading: string | null;
     act_name: string;
     abbrev: string;
-    eli: string;
+    source_url: string;
     version_date: string;
     texts: string[];
     available_langs: string[];
+    citation_label: string;
   };
   return {
-    sr: data.sr,
+    jurisdiction: data.jurisdiction,
+    collection: data.collection,
+    number: data.number,
     article: data.article,
     lang: data.lang,
     heading: data.heading,
     actName: data.act_name,
     abbrev: data.abbrev,
-    eli: data.eli,
+    sourceUrl: data.source_url,
     versionDate: data.version_date,
     texts: data.texts,
     availableLangs: data.available_langs,
+    citationLabel: data.citation_label,
   };
 }
 

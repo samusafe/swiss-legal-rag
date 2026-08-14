@@ -28,19 +28,21 @@ class FakeResult:
 
 
 def make_data(repo_root: Path) -> None:
+    # data/raw/<jurisdiction>/<number>/<lang>.xml (fedlex),
+    # data/chunks/<jurisdiction>/<number>/<lang>.jsonl
     entries = [
-        {"sr": "220", "lang": "de"},
-        {"sr": "220", "lang": "fr"},
-        {"sr": "210", "lang": "de"},
+        {"jurisdiction": "CH", "number": "220", "lang": "de", "source": "fedlex"},
+        {"jurisdiction": "CH", "number": "220", "lang": "fr", "source": "fedlex"},
+        {"jurisdiction": "CH", "number": "210", "lang": "de", "source": "fedlex"},
     ]
     (repo_root / "data").mkdir()
     (repo_root / "data" / "manifest.json").write_text(
         json.dumps({"entries": entries}), encoding="utf-8"
     )
-    (repo_root / "data" / "raw" / "220").mkdir(parents=True)
-    (repo_root / "data" / "raw" / "220" / "de.xml").write_text("<x/>", encoding="utf-8")
-    (repo_root / "data" / "chunks" / "220").mkdir(parents=True)
-    (repo_root / "data" / "chunks" / "220" / "de.jsonl").write_text(
+    (repo_root / "data" / "raw" / "CH" / "220").mkdir(parents=True)
+    (repo_root / "data" / "raw" / "CH" / "220" / "de.xml").write_text("<x/>", encoding="utf-8")
+    (repo_root / "data" / "chunks" / "CH" / "220").mkdir(parents=True)
+    (repo_root / "data" / "chunks" / "CH" / "220" / "de.jsonl").write_text(
         '{"a": 1}\n{"a": 2}\n', encoding="utf-8"
     )
 
@@ -113,6 +115,42 @@ def test_phase_progress_per_phase(tmp_path: Path, monkeypatch) -> None:
     assert phase_progress("fetch", url, repo_root=tmp_path) == (1, 3)
     assert phase_progress("parse", url, repo_root=tmp_path) == (1, 3)
     assert phase_progress("embed", url, repo_root=tmp_path) == (1, 2)
+
+
+def test_phase_progress_fetch_counts_lexwork_json_alongside_fedlex_xml(
+    tmp_path: Path, monkeypatch
+) -> None:
+    entries = [
+        {"jurisdiction": "CH", "number": "220", "lang": "de", "source": "fedlex"},
+        {"jurisdiction": "SG", "number": "811.1", "lang": "de", "source": "lexwork"},
+    ]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "manifest.json").write_text(
+        json.dumps({"entries": entries}), encoding="utf-8"
+    )
+    (tmp_path / "data" / "raw" / "CH" / "220").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "CH" / "220" / "de.xml").write_text("<x/>", encoding="utf-8")
+    (tmp_path / "data" / "raw" / "SG").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "SG" / "811.1.de.json").write_text("{}", encoding="utf-8")
+
+    assert phase_progress("fetch", "postgresql://ignored", repo_root=tmp_path) == (2, 2)
+
+
+def test_ingest_status_counts_acts_as_distinct_jurisdiction_number_pairs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Same act "number" in two different jurisdictions must count as two acts.
+    entries = [
+        {"jurisdiction": "SG", "number": "111.1", "lang": "de", "source": "lexwork"},
+        {"jurisdiction": "BE", "number": "111.1", "lang": "de", "source": "lexwork"},
+    ]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "manifest.json").write_text(
+        json.dumps({"entries": entries}), encoding="utf-8"
+    )
+    monkeypatch.setattr("retrieval.ingest.embedded_count", lambda url: 0)
+    status = ingest_status(IngestState(), "postgresql://ignored", repo_root=tmp_path)
+    assert status["acts"] == 2
 
 
 def test_phase_progress_rejects_unknown_phase(tmp_path: Path) -> None:

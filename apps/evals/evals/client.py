@@ -24,10 +24,14 @@ def search(
     lang: str,
     k: int,
     api_key: str | None = None,
+    canton: str | None = None,
 ) -> list[dict]:
+    body: dict = {"q": question, "lang": lang, "k": k}
+    if canton is not None:
+        body["canton"] = canton
     response = client.post(
         f"{base_url}/search",
-        json={"q": question, "lang": lang, "k": k},
+        json=body,
         headers=auth_headers(api_key),
     )
     response.raise_for_status()
@@ -49,10 +53,14 @@ def chat(
     lang: str,
     k: int,
     api_key: str | None = None,
+    canton: str | None = None,
 ) -> tuple[str, list[dict]]:
+    body: dict = {"question": question, "lang": lang, "k": k}
+    if canton is not None:
+        body["canton"] = canton
     response = client.post(
         f"{base_url}/chat",
-        json={"question": question, "lang": lang, "k": k},
+        json=body,
         headers=auth_headers(api_key),
     )
     if response.status_code != 200:

@@ -5,24 +5,39 @@ import { describe, expect, it, vi } from "vitest";
 import { SourcesPanel } from "./SourcesPanel";
 
 const SOURCE = {
-  sr: "220",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "220",
   article: "335c",
   heading: "Kündigungsfristen",
-  eli: "https://example.test/e",
+  sourceUrl: "https://example.test/e",
   lang: "de",
   score: 0.69,
+  citationLabel: "SR 220 Art. 335c",
+};
+const CANTONAL_SOURCE = {
+  jurisdiction: "sg",
+  collection: "sGS",
+  number: "811.1",
+  article: "2",
+  heading: "Steuerpflicht",
+  sourceUrl: "https://www.gesetzessammlung.sg.ch/app/de/texts_of_law/811.1",
+  lang: "de",
+  score: 0.8,
+  citationLabel: "sGS 811.1 Art. 2",
 };
 const CITATION = {
   raw: "[SR 220 Art. 335c]",
   label: "SR 220 Art. 335c",
-  sr: "220",
+  collection: "SR",
+  number: "220",
   article: "335c",
-  eli: "https://example.test/e",
+  sourceUrl: "https://example.test/e",
   resolved: true,
 };
 
 describe("SourcesPanel", () => {
-  it("shows SR, heading, uppercase lang and the percent score", async () => {
+  it("shows collection, number, heading, uppercase lang and the percent score", async () => {
     const onOpenArticle = vi.fn();
     render(
       <HeroUIProvider>
@@ -40,6 +55,22 @@ describe("SourcesPanel", () => {
     expect(screen.getByText("Kündigungsfristen")).toBeInTheDocument();
     expect(screen.getByText("DE")).toBeInTheDocument();
     expect(screen.getByText("69%")).toBeInTheDocument();
+  });
+
+  it("shows sGS 811.1 · Art. 2 for a cantonal source", () => {
+    render(
+      <HeroUIProvider>
+        <SourcesPanel
+          sources={[CANTONAL_SOURCE]}
+          streaming={false}
+          citations={[]}
+          subtitle="latest answer"
+          onOpenArticle={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByText("sGS 811.1 · Art. 2")).toBeInTheDocument();
   });
 
   it("shows the empty state with the hint when idle", () => {
@@ -80,7 +111,7 @@ describe("SourcesPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("dedupes same (sr, article, lang) keeping the highest score", () => {
+  it("dedupes same (jurisdiction, number, article, lang) keeping the highest score", () => {
     render(
       <HeroUIProvider>
         <SourcesPanel
@@ -151,7 +182,7 @@ describe("SourcesPanel", () => {
 
   it("card shows percentage and opens the article on click", async () => {
     const srcA = { ...SOURCE, score: 0.75 };
-    const srcB = { ...SOURCE, article: "1", score: 0.04 };
+    const srcB = { ...SOURCE, article: "1", score: 0.04, citationLabel: "SR 220 Art. 1" };
     const onOpenArticle = vi.fn();
     render(
       <HeroUIProvider>
@@ -166,10 +197,8 @@ describe("SourcesPanel", () => {
     );
     expect(screen.getByText("75%")).toBeInTheDocument();
     expect(screen.getByText("4%")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /fedlex/i })).not.toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("button", { name: `SR ${srcA.sr} Art. ${srcA.article}` }),
-    );
+    expect(screen.queryByRole("button", { name: /open official source/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: srcA.citationLabel }));
     expect(onOpenArticle).toHaveBeenCalledWith(expect.any(Array), 0);
   });
 });

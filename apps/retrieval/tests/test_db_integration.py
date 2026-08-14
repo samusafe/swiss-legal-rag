@@ -54,33 +54,33 @@ def test_dense_and_fts_search() -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO chunks (sr, lang, article, part, eid, heading, context, text, eli, act_name, abbrev, version_date, embedding, tsv)
+                INSERT INTO chunks (jurisdiction, collection, number, lang, article, part, eid, heading, context, text, source_url, act_name, abbrev, version_date, embedding, tsv)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s)),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s)),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s))
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s)),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s)),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, to_tsvector('german', %s))
                 """
                 , (
-                    "220", "de", "335a", 0, "art_335_a", "Kündigungsfrist", None, "syntheticmarker Kündigungsfrist Arbeitsverhältnis", "https://test.eli/1", "Test Act", "TA", date(2026, 1, 1), [0.1] + [0.0] * 1023, "syntheticmarker Kündigungsfrist Arbeitsverhältnis",
-                    "220", "de", "335b", 0, "art_335_b", "Mietvertrag", None, "Mietvertrag Wohnung", "https://test.eli/2", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.2] + [0.0] * 1022, "Mietvertrag Wohnung",
-                    "220", "de", "335c", 0, "art_335_c", "Datenschutz", None, "Datenschutz Personendaten", "https://test.eli/3", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.0, 0.9] + [0.0] * 1021, "Datenschutz Personendaten",
+                    "CH", "SR", "220", "de", "335a", 0, "art_335_a", "Kündigungsfrist", None, "syntheticmarker Kündigungsfrist Arbeitsverhältnis", "https://test.eli/1", "Test Act", "TA", date(2026, 1, 1), [0.1] + [0.0] * 1023, "syntheticmarker Kündigungsfrist Arbeitsverhältnis",
+                    "CH", "SR", "220", "de", "335b", 0, "art_335_b", "Mietvertrag", None, "Mietvertrag Wohnung", "https://test.eli/2", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.2] + [0.0] * 1022, "Mietvertrag Wohnung",
+                    "CH", "SR", "220", "de", "335c", 0, "art_335_c", "Datenschutz", None, "Datenschutz Personendaten", "https://test.eli/3", "Test Act", "TA", date(2026, 1, 1), [0.0, 0.0, 0.9] + [0.0] * 1021, "Datenschutz Personendaten",
                 )
             )
             conn.commit()
 
         # Test dense_search returns nearest first
-        results = dense_search(conn, [0.1] + [0.0] * 1023, 3)
+        results = dense_search(conn, [0.1] + [0.0] * 1023, 3, ["CH"])
         assert len(results) == 3
         assert results[0].text == "syntheticmarker Kündigungsfrist Arbeitsverhältnis"
 
         # Test fts_search returns matching row first
-        results = fts_search(conn, "syntheticmarker", "de", 5)
+        results = fts_search(conn, "syntheticmarker", "de", 5, ["CH"])
         assert len(results) >= 1
         assert results[0].text == "syntheticmarker Kündigungsfrist Arbeitsverhältnis"
     finally:
         # Cleanup: delete test rows on the same live connection before closing
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM chunks WHERE eli IN (%s, %s, %s)", ("https://test.eli/1", "https://test.eli/2", "https://test.eli/3"))
+            cur.execute("DELETE FROM chunks WHERE source_url IN (%s, %s, %s)", ("https://test.eli/1", "https://test.eli/2", "https://test.eli/3"))
             conn.commit()
         conn.close()
 
@@ -99,29 +99,29 @@ def test_article_rows_and_langs() -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO chunks (sr, lang, article, part, eid, heading, context, text, eli, act_name, abbrev, version_date)
+                INSERT INTO chunks (jurisdiction, collection, number, lang, article, part, eid, heading, context, text, source_url, act_name, abbrev, version_date)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 , (
-                    "220", "de", "335x", 2, "art_335_x", "Probezeit", None, "syntheticmarker part two", "https://test.eli/4", "Test Act", "TA", date(2026, 1, 1),
-                    "220", "de", "335x", 1, "art_335_x", "Probezeit", None, "syntheticmarker part one", "https://test.eli/5", "Test Act", "TA", date(2026, 1, 1),
-                    "220", "fr", "335x", 1, "art_335_x", "Periode d'essai", None, "syntheticmarker partie une", "https://test.eli/6", "Test Act", "TA", date(2026, 1, 1),
+                    "CH", "SR", "220", "de", "335x", 2, "art_335_x", "Probezeit", None, "syntheticmarker part two", "https://test.eli/4", "Test Act", "TA", date(2026, 1, 1),
+                    "CH", "SR", "220", "de", "335x", 1, "art_335_x", "Probezeit", None, "syntheticmarker part one", "https://test.eli/5", "Test Act", "TA", date(2026, 1, 1),
+                    "CH", "SR", "220", "fr", "335x", 1, "art_335_x", "Periode d'essai", None, "syntheticmarker partie une", "https://test.eli/6", "Test Act", "TA", date(2026, 1, 1),
                 )
             )
             conn.commit()
 
-        rows = article_rows(conn, "220", "335x", "de")
+        rows = article_rows(conn, "CH", "220", "335x", "de")
         assert [r.text for r in rows] == ["syntheticmarker part one", "syntheticmarker part two"]
 
-        langs = article_langs(conn, "220", "335x")
+        langs = article_langs(conn, "CH", "220", "335x")
         assert langs == ["de", "fr"]
     finally:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM chunks WHERE eli IN (%s, %s, %s)",
+                "DELETE FROM chunks WHERE source_url IN (%s, %s, %s)",
                 ("https://test.eli/4", "https://test.eli/5", "https://test.eli/6"),
             )
             conn.commit()

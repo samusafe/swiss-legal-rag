@@ -50,7 +50,7 @@ function SearchResultRow({
       }`}
     >
       <span className="text-xs font-semibold text-foreground-500">
-        SR {result.sr} · Art. {result.article}
+        {result.collection} {result.number} · Art. {result.article}
       </span>
       {result.heading !== null && (
         <span className="text-xs text-foreground-400">{result.heading}</span>
@@ -209,7 +209,7 @@ export function SearchPalette({ isOpen, onClose, onSelect }: SearchPaletteProps)
             {trimmedQuery !== "" && !searching && !searchError && results.length > 0 && (
               <ul role="listbox" aria-label={t("search.placeholder")} className="flex flex-col gap-0.5">
                 {results.map((result, i) => (
-                  <li key={`${result.sr}-${result.article}-${i}`} role="option" aria-selected={i === selectedIndex}>
+                  <li key={`${result.jurisdiction}-${result.number}-${result.article}-${i}`} role="option" aria-selected={i === selectedIndex}>
                     <SearchResultRow
                       result={result}
                       maxScore={maxScore}

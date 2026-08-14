@@ -36,28 +36,33 @@ def test_upsert_chunks_incrementally_refreshes_an_act() -> None:
     with conn:
         conn.execute(SCHEMA_SQL)
         register_vector(conn)
-        # Use a synthetic SR absent from corpus.yaml so this test's DELETE FROM
-        # chunks WHERE eli = %s AND part = %s can never touch real ingested rows
-        # (e.g. SR 220, the real Code of Obligations) if run against the dev DB.
-        kept = chunk_for("A › B").model_copy(update={"sr": "999.999"})
+        # Use a synthetic act number absent from corpus.yaml so this test's DELETE FROM
+        # chunks WHERE jurisdiction = ... AND number = ... can never touch real ingested
+        # rows (e.g. SR 220, the real Code of Obligations) if run against the dev DB.
+        kept = chunk_for("A › B").model_copy(update={"number": "999.999"})
         stale = kept.model_copy(
             update={
                 "article": "336",
                 "eid": "art_336",
-                "eli": kept.eli.replace("335_c", "336"),
+                "source_url": kept.source_url.replace("335_c", "336"),
             }
         )
         upsert_chunks(conn, [kept, stale])
-        conn.execute("UPDATE chunks SET embedding = %s WHERE eli = %s", ([0.5] * 1024, kept.eli))
+        conn.execute(
+            "UPDATE chunks SET embedding = %s WHERE jurisdiction = %s AND number = %s "
+            "AND lang = %s AND eid = %s AND part = %s",
+            ([0.5] * 1024, kept.jurisdiction, kept.number, kept.lang, kept.eid, kept.part or 0),
+        )
 
         # rerun with only `kept`, text unchanged: `stale`'s row (a revoked/renumbered
         # article) is gone, but `kept`'s embedding survives since its text didn't change.
         upsert_chunks(conn, [kept])
 
         rows = conn.execute(
-            "SELECT eli, embedding IS NULL FROM chunks WHERE sr = %s", (kept.sr,)
+            "SELECT eid, embedding IS NULL FROM chunks WHERE jurisdiction = %s AND number = %s",
+            (kept.jurisdiction, kept.number),
         ).fetchall()
-        assert {r[0] for r in rows} == {kept.eli}
+        assert {r[0] for r in rows} == {kept.eid}
         assert rows[0][1] is False
 
         # rerun again with `kept`'s text changed: its row is updated and the
@@ -66,9 +71,14 @@ def test_upsert_chunks_incrementally_refreshes_an_act() -> None:
         upsert_chunks(conn, [changed])
 
         rows = conn.execute(
-            "SELECT eli, embedding IS NULL, text FROM chunks WHERE sr = %s", (kept.sr,)
+            "SELECT eid, embedding IS NULL, text FROM chunks "
+            "WHERE jurisdiction = %s AND number = %s",
+            (kept.jurisdiction, kept.number),
         ).fetchall()
         assert rows[0][1] is True
         assert rows[0][2] == changed.text
 
-        conn.execute("DELETE FROM chunks WHERE sr = %s", (kept.sr,))
+        conn.execute(
+            "DELETE FROM chunks WHERE jurisdiction = %s AND number = %s",
+            (kept.jurisdiction, kept.number),
+        )

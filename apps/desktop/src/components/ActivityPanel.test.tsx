@@ -210,6 +210,39 @@ describe("ActivityPanel", () => {
     expect(grid.className).toContain("sm:grid-cols-3");
     expect(grid.className).not.toContain("grid-cols-5");
   });
+
+  it("renders article.external and settings.jurisdiction rows in the event list", async () => {
+    queryAuditMock.mockResolvedValue({
+      rows: [
+        {
+          id: 3,
+          ts: "2026-08-11T10:00:00.000Z",
+          type: "article.external",
+          detail: JSON.stringify({ collection: "ZH", number: "131.1", article: "5" }),
+          durationMs: null,
+          question: null,
+        },
+        {
+          id: 4,
+          ts: "2026-08-11T11:00:00.000Z",
+          type: "settings.jurisdiction",
+          detail: JSON.stringify({
+            from: { jurisdiction: "federal" },
+            to: { jurisdiction: "cantonal", canton: "ZH" },
+          }),
+          durationMs: null,
+          question: null,
+        },
+      ],
+      total: 2,
+    });
+    renderPanel();
+
+    expect(await screen.findByText("ZH 131.1 Art. 5")).toBeInTheDocument();
+    expect(screen.getByText("— → ZH")).toBeInTheDocument();
+    expect(screen.getByText("article.external")).toBeInTheDocument();
+    expect(screen.getByText("settings.jurisdiction")).toBeInTheDocument();
+  });
 });
 
 describe("describeEvent", () => {
@@ -276,5 +309,86 @@ describe("describeEvent", () => {
   it("falls back to the raw string when detail is not valid JSON", () => {
     const result = describeEvent(row({ type: "ingest.error", detail: "not json" }));
     expect(result).toBe("not json");
+  });
+
+  it("renders an article.open summary from the generalized collection/number detail", () => {
+    const result = describeEvent(
+      row({
+        type: "article.open",
+        detail: JSON.stringify({
+          collection: "SR",
+          number: "220",
+          article: "335c",
+          lang: "de",
+          origin: "card",
+        }),
+      }),
+    );
+    expect(result).toBe("SR 220 Art. 335c · DE · card");
+  });
+
+  it("renders an article.langSwitch summary from the generalized collection/number detail", () => {
+    const result = describeEvent(
+      row({
+        type: "article.langSwitch",
+        detail: JSON.stringify({
+          collection: "SR",
+          number: "220",
+          article: "335c",
+          from: "de",
+          to: "fr",
+        }),
+      }),
+    );
+    expect(result).toBe("SR 220 Art. 335c · DE → FR");
+  });
+
+  it("renders an article.external summary with collection, number, and article", () => {
+    const result = describeEvent(
+      row({
+        type: "article.external",
+        detail: JSON.stringify({ collection: "ZH", number: "131.1", article: "5" }),
+      }),
+    );
+    expect(result).toBe("ZH 131.1 Art. 5");
+  });
+
+  it("renders a settings.jurisdiction summary as from-canton arrow to-canton", () => {
+    const result = describeEvent(
+      row({
+        type: "settings.jurisdiction",
+        detail: JSON.stringify({
+          from: { jurisdiction: "cantonal", canton: "ZH" },
+          to: { jurisdiction: "cantonal", canton: "BE" },
+        }),
+      }),
+    );
+    expect(result).toBe("ZH → BE");
+  });
+
+  it("renders a settings.jurisdiction summary with an em dash when a side has no canton (federal)", () => {
+    const result = describeEvent(
+      row({
+        type: "settings.jurisdiction",
+        detail: JSON.stringify({
+          from: { jurisdiction: "federal" },
+          to: { jurisdiction: "cantonal", canton: "GE" },
+        }),
+      }),
+    );
+    expect(result).toBe("— → GE");
+  });
+
+  // Historical SQLite rows keep the pre-migration type string and detail
+  // shape (removed from AuditType, so the DB's runtime value is asserted
+  // past the type system here) — the row must fall back to raw rendering
+  // instead of throwing.
+  it("falls back without crashing for a historical article.fedlex row with an old {sr} detail", () => {
+    const legacyRow = row({
+      type: "article.fedlex" as unknown as AuditRow["type"],
+      detail: JSON.stringify({ sr: "220", article: "335c" }),
+    });
+    expect(() => describeEvent(legacyRow)).not.toThrow();
+    expect(describeEvent(legacyRow)).toBe(JSON.stringify({ sr: "220", article: "335c" }));
   });
 });

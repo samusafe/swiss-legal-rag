@@ -11,8 +11,8 @@ ALLOWED_URL_PREFIX = "https://fedlex.data.admin.ch/"
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # generous cap for a single Fedlex act XML file
 
 
-def _meta_path(raw_dir: Path, sr: str) -> Path:
-    return raw_dir / sr / "fetch-meta.json"
+def _meta_path(raw_dir: Path, jurisdiction: str, number: str) -> Path:
+    return raw_dir / jurisdiction / number / "fetch-meta.json"
 
 
 def _load_meta(path: Path) -> dict[str, FetchMeta]:
@@ -59,11 +59,22 @@ def fetch_all(
     sleep: Callable[[float], None],
 ) -> list[Path]:
     downloaded: list[Path] = []
-    meta_cache: dict[str, dict[str, FetchMeta]] = {}
+    meta_cache: dict[tuple[str, str], dict[str, FetchMeta]] = {}
     for entry in manifest.entries:
-        target = raw_dir / entry.sr / f"{entry.lang}.xml"
-        meta_path = _meta_path(raw_dir, entry.sr)
-        meta = meta_cache.setdefault(entry.sr, _load_meta(meta_path))
+        if entry.source == "lexwork":
+            # lexwork downloads happen in resolve.py, never here — just confirm the
+            # cached JSON that resolve wrote is actually on disk.
+            cached = raw_dir / entry.jurisdiction / f"{entry.number}.{entry.lang}.json"
+            if not cached.exists():
+                raise RuntimeError(
+                    f"missing cached LexWork JSON for {entry.jurisdiction} {entry.number} "
+                    f"({entry.lang}): {cached} — re-run `ingest resolve`"
+                )
+            continue
+        target = raw_dir / entry.jurisdiction / entry.number / f"{entry.lang}.xml"
+        meta_path = _meta_path(raw_dir, entry.jurisdiction, entry.number)
+        meta_key = (entry.jurisdiction, entry.number)
+        meta = meta_cache.setdefault(meta_key, _load_meta(meta_path))
         fingerprint = FetchMeta(file_url=entry.file_url, version_date=entry.version_date)
         if target.exists() and meta.get(entry.lang) == fingerprint:
             continue  # cache hit — same source URL and Fedlex version_date already downloaded

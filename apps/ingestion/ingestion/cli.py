@@ -1,4 +1,5 @@
 import argparse
+import sys
 import time
 from datetime import date
 from pathlib import Path
@@ -34,7 +35,9 @@ def main(argv: list[str] | None = None) -> None:
         help="directory for manifest.json and raw/ downloads (default: data)",
     )
 
-    parser = argparse.ArgumentParser(prog="ingest", description="Fedlex corpus ingestion")
+    parser = argparse.ArgumentParser(
+        prog="ingest", description="Corpus ingestion (Fedlex + cantonal sources)"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "resolve", parents=[common], help="SPARQL-resolve current versions to manifest.json"
@@ -56,9 +59,24 @@ def main(argv: list[str] | None = None) -> None:
         with _make_client() as client:
             if args.command == "resolve":
                 corpus = load_corpus(args.corpus)
-                manifest = resolve_corpus(corpus, client, today=date.today(), sleep=time.sleep)
+                manifest, failures = resolve_corpus(
+                    corpus, client, today=date.today(), sleep=time.sleep,
+                    raw_dir=args.data_dir / "raw",
+                )
+                # Save whatever succeeded even when some acts failed (spec §3) — a
+                # single bad act must not discard the rest of a multi-hour resolve.
                 manifest.save(manifest_path)
                 print(f"resolved {len(manifest.entries)} act-language versions -> {manifest_path}")
+                if failures:
+                    print(f"{len(failures)} act(s) failed to resolve:", file=sys.stderr)
+                    for failure in failures:
+                        lang_part = f"/{failure.lang}" if failure.lang else ""
+                        print(
+                            f"  {failure.jurisdiction} {failure.number}{lang_part}: "
+                            f"{failure.error}",
+                            file=sys.stderr,
+                        )
+                    sys.exit(1)
             elif args.command == "fetch":
                 manifest = Manifest.load(manifest_path)
                 downloaded = fetch_all(manifest, client, args.data_dir / "raw", sleep=time.sleep)

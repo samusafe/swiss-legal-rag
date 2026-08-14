@@ -11,17 +11,19 @@ vi.mock("../lib/open", () => ({
 const RESOLVED = {
   raw: "[SR 220 Art. 335c]",
   label: "SR 220 Art. 335c",
-  sr: "220",
+  collection: "SR",
+  number: "220",
   article: "335c",
-  eli: "https://example.test/e",
+  sourceUrl: "https://example.test/e",
   resolved: true,
 };
 const UNRESOLVED = {
   raw: "[SR 210 Art. 1]",
   label: "SR 210 Art. 1",
-  sr: "210",
+  collection: "SR",
+  number: "210",
   article: "1",
-  eli: null,
+  sourceUrl: null,
   resolved: false,
 };
 
@@ -55,8 +57,9 @@ describe("MessageList", () => {
   it("renders one chip button per reference when two citations share a raw bracket", () => {
     const shared = {
       raw: "[SR 822.11 Art. 9, SR 822.11 Art. 12]",
-      sr: "822.11",
-      eli: "https://example.test/e",
+      collection: "SR",
+      number: "822.11",
+      sourceUrl: "https://example.test/e",
       resolved: true,
     };
     render(

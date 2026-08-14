@@ -155,12 +155,12 @@ const dict = {
     it: "Espandi le fonti",
     pt: "Expandir fontes",
   },
-  "preview.fedlex": {
-    en: "View on Fedlex",
-    de: "Auf Fedlex ansehen",
-    fr: "Voir sur Fedlex",
-    it: "Visualizza su Fedlex",
-    pt: "Ver no Fedlex",
+  "preview.source": {
+    en: "Open official source",
+    de: "Offizielle Quelle öffnen",
+    fr: "Ouvrir la source officielle",
+    it: "Apri la fonte ufficiale",
+    pt: "Abrir fonte oficial",
   },
   "preview.loading": {
     en: "Loading preview…",
@@ -180,6 +180,34 @@ const dict = {
   "settings.corpus": { en: "Corpus", de: "Korpus", fr: "Corpus", it: "Corpus", pt: "Corpus" },
   "settings.export": { en: "Export", de: "Export", fr: "Exporter", it: "Esporta", pt: "Exportar" },
   "settings.language": { en: "Language", de: "Sprache", fr: "Langue", it: "Lingua", pt: "Idioma" },
+  "settings.jurisdiction": {
+    en: "Jurisdiction",
+    de: "Zuständigkeit",
+    fr: "Juridiction",
+    it: "Giurisdizione",
+    pt: "Jurisdição",
+  },
+  "settings.jurisdictionNone": {
+    en: "None — federal law only",
+    de: "Keine — nur Bundesrecht",
+    fr: "Aucune — droit fédéral uniquement",
+    it: "Nessuna — solo diritto federale",
+    pt: "Nenhuma — apenas direito federal",
+  },
+  "settings.jurisdictionFederalOnly": {
+    en: "federal only",
+    de: "nur Bundesrecht",
+    fr: "fédéral uniquement",
+    it: "solo federale",
+    pt: "apenas federal",
+  },
+  "settings.jurisdictionHint": {
+    en: "Answers include this canton's law where available.",
+    de: "Antworten berücksichtigen kantonales Recht, sofern verfügbar.",
+    fr: "Les réponses incluent le droit de ce canton lorsqu'il est disponible.",
+    it: "Le risposte includono il diritto di questo cantone, se disponibile.",
+    pt: "As respostas incluem o direito deste cantão quando disponível.",
+  },
   "settings.notifications": {
     en: "Notifications",
     de: "Benachrichtigungen",
@@ -296,12 +324,12 @@ const dict = {
     it: "Questo articolo non è disponibile in questa lingua.",
     pt: "Este artigo não está disponível nesta língua.",
   },
-  "article.fedlex": {
-    en: "Open in Fedlex",
-    de: "In Fedlex öffnen",
-    fr: "Ouvrir dans Fedlex",
-    it: "Apri in Fedlex",
-    pt: "Abrir no Fedlex",
+  "article.source": {
+    en: "Open official source",
+    de: "Offizielle Quelle öffnen",
+    fr: "Ouvrir la source officielle",
+    it: "Apri la fonte ufficiale",
+    pt: "Abrir fonte oficial",
   },
   "article.version": {
     en: "Version of {date}",

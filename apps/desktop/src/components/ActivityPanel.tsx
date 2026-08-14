@@ -108,11 +108,16 @@ export function describeEvent(row: AuditRow): string {
     case "search.query":
       return `«${str(detail, "query")}» · ${t("activity.results", { n: num(detail, "results") })}`;
     case "article.open":
-      return `SR ${str(detail, "sr")} Art. ${str(detail, "article")} · ${str(detail, "lang").toUpperCase()} · ${str(detail, "origin")}`;
+      return `${str(detail, "collection")} ${str(detail, "number")} Art. ${str(detail, "article")} · ${str(detail, "lang").toUpperCase()} · ${str(detail, "origin")}`;
     case "article.langSwitch":
-      return `SR ${str(detail, "sr")} Art. ${str(detail, "article")} · ${str(detail, "from").toUpperCase()} → ${str(detail, "to").toUpperCase()}`;
-    case "article.fedlex":
-      return `SR ${str(detail, "sr")} Art. ${str(detail, "article")}`;
+      return `${str(detail, "collection")} ${str(detail, "number")} Art. ${str(detail, "article")} · ${str(detail, "from").toUpperCase()} → ${str(detail, "to").toUpperCase()}`;
+    case "article.external":
+      return `${str(detail, "collection")} ${str(detail, "number")} Art. ${str(detail, "article")}`;
+    case "settings.jurisdiction": {
+      const from = asRecord(detail["from"]);
+      const to = asRecord(detail["to"]);
+      return `${strOrNull(from, "canton") ?? "—"} → ${strOrNull(to, "canton") ?? "—"}`;
+    }
     case "convo.create":
     case "convo.rename":
     case "convo.delete":

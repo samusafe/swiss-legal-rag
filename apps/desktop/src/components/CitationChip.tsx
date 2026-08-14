@@ -8,7 +8,7 @@ export function CitationChip({
   citation: Citation;
   onOpen?: (citation: Citation) => void;
 }) {
-  if (!citation.resolved || citation.eli === null) {
+  if (!citation.resolved || citation.sourceUrl === null) {
     return (
       <Chip
         size="sm"

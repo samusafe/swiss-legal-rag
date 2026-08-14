@@ -19,24 +19,30 @@ const searchMock = vi.mocked(search);
 const logAuditMock = vi.mocked(logAudit);
 
 const RESULT_A: SearchResult = {
-  sr: "220",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "220",
   article: "335c",
   heading: "Kündigungsfrist",
   context: "Die Kündigungsfrist beträgt einen Monat während des ersten Dienstjahres.",
   text: "full text a",
-  eli: "https://example.test/a",
+  sourceUrl: "https://example.test/a",
   actName: "Obligationenrecht",
   score: 9.5,
+  citationLabel: "SR 220 Art. 335c",
 };
 const RESULT_B: SearchResult = {
-  sr: "210",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "210",
   article: "1",
   heading: null,
   context: null,
   text: "full text b",
-  eli: "https://example.test/b",
+  sourceUrl: "https://example.test/b",
   actName: "ZGB",
   score: 4.75,
+  citationLabel: "SR 210 Art. 1",
 };
 
 beforeEach(() => {

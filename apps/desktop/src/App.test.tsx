@@ -61,7 +61,7 @@ vi.mock("./lib/db", () => ({
 
 import { fetchArticle, search } from "./lib/api";
 import type { Article } from "./lib/api";
-import { deleteConversation, listConversations, renameConversation } from "./lib/db";
+import { deleteConversation, getMessages, listConversations, renameConversation } from "./lib/db";
 import type { Conversation } from "./lib/db";
 
 const searchMock = vi.mocked(search);
@@ -69,6 +69,7 @@ const fetchArticleMock = vi.mocked(fetchArticle);
 const listConversationsMock = vi.mocked(listConversations);
 const deleteConversationMock = vi.mocked(deleteConversation);
 const renameConversationMock = vi.mocked(renameConversation);
+const getMessagesMock = vi.mocked(getMessages);
 
 const CONVERSATION: Conversation = {
   id: "conv-1",
@@ -78,14 +79,17 @@ const CONVERSATION: Conversation = {
 };
 
 const RESULT: SearchResult = {
-  sr: "220",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "220",
   article: "335c",
   heading: "Kündigungsfrist",
   context: "Die Kündigungsfrist beträgt einen Monat.",
   text: "full text",
-  eli: "https://example.test/220",
+  sourceUrl: "https://example.test/220",
   actName: "Obligationenrecht",
   score: 9.5,
+  citationLabel: "SR 220 Art. 335c",
 };
 
 it("renders header, empty-sources hint and a disabled composer while offline", async () => {
@@ -136,16 +140,19 @@ it("opens the article document modal when a palette search result is selected", 
   searchMock.mockResolvedValue([RESULT]);
   fetchArticleMock.mockReset();
   const article: Article = {
-    sr: "220",
+    jurisdiction: "ch",
+    collection: "SR",
+    number: "220",
     article: "335c",
     lang: "de",
     heading: "Kündigungsfrist",
     actName: "Obligationenrecht",
     abbrev: "OR",
-    eli: "https://example.test/220",
+    sourceUrl: "https://example.test/220",
     versionDate: "2024-01-01",
     texts: ["Die Kündigungsfrist beträgt einen Monat."],
     availableLangs: ["de"],
+    citationLabel: "SR 220 Art. 335c",
   };
   fetchArticleMock.mockResolvedValue(article);
   const user = userEvent.setup();
@@ -167,7 +174,7 @@ it("opens the article document modal when a palette search result is selected", 
     await screen.findByText("Die Kündigungsfrist beträgt einen Monat."),
   ).toBeInTheDocument();
   expect(screen.queryByPlaceholderText("Search articles…")).not.toBeInTheDocument();
-  expect(fetchArticleMock).toHaveBeenCalledWith("220", "335c", "de", expect.any(AbortSignal));
+  expect(fetchArticleMock).toHaveBeenCalledWith("ch", "220", "335c", "de", expect.any(AbortSignal));
 });
 
 it("opens Settings from the header gear", async () => {
@@ -280,6 +287,65 @@ it("stacks below lg (chat primary, bounded sources, overlay sidebar) but keeps t
   // narrow viewport can only be confirmed in `pnpm tauri dev`.
   const sidebar = screen.getByRole("navigation", { name: "Conversations" });
   expect(sidebar).toHaveClass("absolute", "lg:static");
+});
+
+it("matches a [BSG 721.0 Art. 4] citation in a resumed conversation to its source and opens the article", async () => {
+  listConversationsMock.mockResolvedValueOnce([CONVERSATION]);
+  getMessagesMock.mockResolvedValueOnce([
+    {
+      id: "m1",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "Die Bauvorschriften gelten [BSG 721.0 Art. 4].",
+      sourcesJson: JSON.stringify([
+        {
+          jurisdiction: "be",
+          collection: "BSG",
+          number: "721.0",
+          article: "4",
+          heading: "Baubewilligung",
+          sourceUrl: "https://www.belex.sites.be.ch/app/be/texts_of_law/721.0",
+          lang: "de",
+          score: 5,
+          citationLabel: "BSG 721.0 Art. 4",
+        },
+      ]),
+      createdAt: "2026-01-01T00:00:01.000Z",
+    },
+  ]);
+  const article: Article = {
+    jurisdiction: "be",
+    collection: "BSG",
+    number: "721.0",
+    article: "4",
+    lang: "de",
+    heading: "Baubewilligung",
+    actName: "Baugesetz",
+    abbrev: "BauG",
+    sourceUrl: "https://www.belex.sites.be.ch/app/be/texts_of_law/721.0",
+    versionDate: "2024-01-01",
+    texts: ["Die Bauvorschriften gelten."],
+    availableLangs: ["de"],
+    citationLabel: "BSG 721.0 Art. 4",
+  };
+  fetchArticleMock.mockReset();
+  fetchArticleMock.mockResolvedValue(article);
+  const user = userEvent.setup();
+  render(
+    <HeroUIProvider>
+      <App />
+    </HeroUIProvider>,
+  );
+
+  await user.click(await screen.findByText("Kündigungsfrist?"));
+  // Both the message's citation chip and the sources panel's card share the
+  // same accessible name (the source's citationLabel) — the chip is the
+  // first in DOM order (message list renders before the sources panel).
+  const matches = await screen.findAllByRole("button", { name: "BSG 721.0 Art. 4" });
+  await user.click(matches[0]);
+
+  expect(await screen.findByText("Die Bauvorschriften gelten.")).toBeInTheDocument();
+  expect(fetchArticleMock).toHaveBeenCalledWith("be", "721.0", "4", "de", expect.any(AbortSignal));
 });
 
 it("surfaces a rejected mount-time conversation-list refresh as a visible error banner", async () => {

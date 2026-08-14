@@ -1,37 +1,104 @@
-# Corpus manifest — every act is fetched in each language via the Fedlex
-# SPARQL endpoint. Adding an act = one entry here + re-run ingestion.
-# SR = Systematic Compilation number (Systematische Rechtssammlung).
+# Corpus manifest — one block per jurisdiction; adding an act = one entry,
+# adding a canton = one block.
+# CH acts are fetched in each language via the Fedlex SPARQL endpoint (SR =
+# Systematische Rechtssammlung). Cantonal acts are fetched via each canton's
+# LexWork JSON API (collection = the canton's own systematic-collection code).
 
-languages: [de, fr, it]
+jurisdictions:
+  - code: CH
+    source: fedlex
+    collection: SR
+    languages: [de, fr, it]
+    acts:
+      - number: "101"
+        name: Federal Constitution
+        abbrev: BV / Cst.
+      - number: "210"
+        name: Civil Code
+        abbrev: ZGB / CC
+      - number: "220"
+        name: Code of Obligations
+        abbrev: OR / CO
+      - number: "235.1"
+        name: Federal Act on Data Protection
+        abbrev: DSG / LPD
+      - number: "311.0"
+        name: Criminal Code
+        abbrev: StGB / CP
+      - number: "822.11"
+        name: Labour Act
+        abbrev: ArG / LTr
+      - number: "830.1"
+        name: General Part of Social Insurance Law Act
+        abbrev: ATSG / LPGA
+      - number: "837.0"
+        name: Unemployment Insurance Act
+        abbrev: AVIG / LACI
+      - number: "142.20"
+        name: Foreign Nationals and Integration Act
+        abbrev: AIG / LEI
+      - number: "741.01"
+        name: Road Traffic Act
+        abbrev: SVG / LCR
 
-acts:
-  - sr: "101"
-    name: Federal Constitution
-    abbrev: BV / Cst.
-  - sr: "210"
-    name: Civil Code
-    abbrev: ZGB / CC
-  - sr: "220"
-    name: Code of Obligations
-    abbrev: OR / CO
-  - sr: "235.1"
-    name: Federal Act on Data Protection
-    abbrev: DSG / LPD
-  - sr: "311.0"
-    name: Criminal Code
-    abbrev: StGB / CP
-  - sr: "822.11"
-    name: Labour Act
-    abbrev: ArG / LTr
-  - sr: "830.1"
-    name: General Part of Social Insurance Law Act
-    abbrev: ATSG / LPGA
-  - sr: "837.0"
-    name: Unemployment Insurance Act
-    abbrev: AVIG / LACI
-  - sr: "142.20"
-    name: Foreign Nationals and Integration Act
-    abbrev: AIG / LEI
-  - sr: "741.01"
-    name: Road Traffic Act
-    abbrev: SVG / LCR
+  - code: SG
+    source: lexwork
+    collection: sGS
+    base_url: https://www.gesetzessammlung.sg.ch
+    languages: [de]
+    acts:
+      - number: "111.1"
+        name: Verfassung des Kantons St.Gallen
+        abbrev: KV
+      - number: "811.1"
+        name: Steuergesetz
+        abbrev: StG
+      - number: "731.1"
+        name: Planungs- und Baugesetz
+        abbrev: PBG
+      - number: "213.1"
+        name: Volksschulgesetz
+        abbrev: VSG
+      - number: "381.1"
+        name: Sozialhilfegesetz
+        abbrev: SHG
+      - number: "451.1"
+        name: Polizeigesetz
+        abbrev: PG
+      - number: "151.2"
+        name: Gemeindegesetz
+        abbrev: GG
+      - number: "140.1"
+        name: Staatsverwaltungsgesetz
+        abbrev: StVG
+
+  - code: BE
+    source: lexwork
+    collection: BSG
+    base_url: https://www.belex.sites.be.ch
+    languages: [de, fr]
+    acts:
+      - number: "101.1"
+        name: Verfassung des Kantons Bern
+        abbrev: KV
+      - number: "661.11"
+        name: Steuergesetz
+        abbrev: StG
+      - number: "721.0"
+        name: Baugesetz
+        abbrev: BauG
+      - number: "432.210"
+        name: Volksschulgesetz
+        abbrev: VSG
+      - number: "551.1"
+        name: Polizeigesetz
+        abbrev: PolG
+      - number: "860.1"
+        name: Sozialhilfegesetz
+        abbrev: SHG
+      - number: "170.11"
+        name: Gemeindegesetz
+        abbrev: GG
+      - number: "153.01"
+        name: Personalgesetz
+        abbrev: PG

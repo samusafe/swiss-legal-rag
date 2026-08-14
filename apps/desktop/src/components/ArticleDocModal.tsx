@@ -10,20 +10,22 @@ import {
 import { useEffect, useState } from "react";
 import { ApiError, fetchArticle } from "../lib/api";
 import type { Article, SearchLang } from "../lib/api";
+import type { ArticleRef } from "../lib/sources";
 import { openExternal } from "../lib/open";
 import { logAudit } from "../lib/audit";
 import { t } from "../i18n";
 
-export interface ArticleRef {
-  sr: string;
-  article: string;
-  lang: SearchLang;
+// Preferred display order for language tabs; the actual set shown for a
+// given article is narrowed to `article.availableLangs` below — a cantonal
+// act ingested in one language only shows one tab, not two disabled ones.
+const LANG_ORDER: readonly SearchLang[] = ["de", "fr", "it"];
+
+function isSearchLang(value: string): value is SearchLang {
+  return value === "de" || value === "fr" || value === "it";
 }
 
-const CORPUS_LANGS: readonly SearchLang[] = ["de", "fr", "it"];
-
-// Per-(sr, article, lang) cache of full articles so revisiting one (arrows,
-// language tabs) is instant. Session-lifetime bounded.
+// Per-(jurisdiction, number, article, lang) cache of full articles so
+// revisiting one (arrows, language tabs) is instant. Session-lifetime bounded.
 const cache = new Map<string, Article>();
 
 interface Loaded {
@@ -34,7 +36,10 @@ interface Loaded {
 
 function useArticle(ref: ArticleRef | null, lang: SearchLang | null): Loaded {
   const effectiveLang = lang ?? ref?.lang ?? "de";
-  const key = ref === null ? null : `${ref.sr}:${ref.article.toLowerCase()}:${effectiveLang}`;
+  const key =
+    ref === null
+      ? null
+      : `${ref.jurisdiction}:${ref.number}:${ref.article.toLowerCase()}:${effectiveLang}`;
   const [state, setState] = useState<Loaded>({ loading: false, status: null, article: null });
 
   useEffect(() => {
@@ -46,14 +51,17 @@ function useArticle(ref: ArticleRef | null, lang: SearchLang | null): Loaded {
     }
     const controller = new AbortController();
     setState({ loading: true, status: null, article: null });
-    fetchArticle(ref.sr, ref.article, effectiveLang, controller.signal)
+    fetchArticle(ref.jurisdiction, ref.number, ref.article, effectiveLang, controller.signal)
       .then((article) => {
         cache.set(key, article);
         setState({ loading: false, status: null, article });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        console.error(`failed to load article SR ${ref.sr} Art. ${ref.article}`, error);
+        console.error(
+          `failed to load article ${ref.jurisdiction} ${ref.number} Art. ${ref.article}`,
+          error,
+        );
         setState({
           loading: false,
           status: error instanceof ApiError ? error.status : 0,
@@ -82,9 +90,9 @@ function ArrowIcon({ direction }: { direction: "left" | "right" }) {
   );
 }
 
-/** Document-style reader for one full article, with DE/FR/IT tabs and ←/→
- * navigation across the refs it was opened with (an answer's sources, or a
- * search result list). */
+/** Document-style reader for one full article, with per-article language tabs
+ * and ←/→ navigation across the refs it was opened with (an answer's
+ * sources, or a search result list). */
 export function ArticleDocModal({
   target,
   onClose,
@@ -113,10 +121,12 @@ export function ArticleDocModal({
     setLangTab(null); // each article opens in its own source language
   }
 
-  const disabledLangs =
-    article === null
-      ? []
-      : CORPUS_LANGS.filter((lang) => !article.availableLangs.includes(lang));
+  // Only the languages this article actually has content in — before the
+  // article loads, just the one being fetched.
+  const langOptions: SearchLang[] =
+    article !== null
+      ? LANG_ORDER.filter((lang) => article.availableLangs.includes(lang))
+      : [shownLang];
 
   return (
     <Modal
@@ -154,8 +164,8 @@ export function ArticleDocModal({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs uppercase tracking-wide text-foreground-400">
                   {article !== null
-                    ? `${article.actName} (${article.abbrev}) · SR ${article.sr}`
-                    : `SR ${ref.sr}`}
+                    ? `${article.actName} (${article.abbrev}) · ${article.collection} ${article.number}`
+                    : ref.number}
                 </p>
                 <p className="truncate font-semibold">
                   Art. {ref.article}
@@ -182,19 +192,24 @@ export function ArticleDocModal({
               <Tabs
                 size="sm"
                 selectedKey={shownLang}
-                disabledKeys={disabledLangs}
                 onSelectionChange={(key) => {
-                  logAudit("article.langSwitch", {
-                    sr: ref.sr,
-                    article: ref.article,
-                    from: shownLang,
-                    to: key as SearchLang,
-                  });
-                  setLangTab(key as SearchLang);
+                  const rawKey = key as string;
+                  const to = isSearchLang(rawKey) ? rawKey : "de";
+                  if (article !== null) {
+                    logAudit("article.langSwitch", {
+                      jurisdiction: article.jurisdiction,
+                      collection: article.collection,
+                      number: article.number,
+                      article: article.article,
+                      from: shownLang,
+                      to,
+                    });
+                  }
+                  setLangTab(to);
                 }}
                 aria-label="Language"
               >
-                {CORPUS_LANGS.map((lang) => (
+                {langOptions.map((lang) => (
                   <Tab key={lang} title={lang.toUpperCase()} />
                 ))}
               </Tabs>
@@ -243,12 +258,17 @@ export function ArticleDocModal({
                 isDisabled={article === null}
                 onPress={() => {
                   if (article !== null) {
-                    logAudit("article.fedlex", { sr: article.sr, article: article.article });
-                    openExternal(article.eli);
+                    logAudit("article.external", {
+                      jurisdiction: article.jurisdiction,
+                      collection: article.collection,
+                      number: article.number,
+                      article: article.article,
+                    });
+                    openExternal(article.sourceUrl);
                   }
                 }}
               >
-                {t("article.fedlex")}
+                {t("article.source")}
               </Button>
             </div>
           </ModalBody>

@@ -31,7 +31,7 @@ export function toMarkdown(conversation: Conversation, messages: StoredMessage[]
       if (sources.length > 0) {
         lines.push("");
         for (const source of sources) {
-          lines.push(`- SR ${source.sr} Art. ${source.article}`);
+          lines.push(`- ${source.citationLabel}`);
         }
       }
     }

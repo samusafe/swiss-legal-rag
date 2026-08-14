@@ -6,13 +6,16 @@ from ingestion.models import Manifest, ManifestEntry
 
 def make_entry() -> ManifestEntry:
     return ManifestEntry(
-        sr="220",
+        jurisdiction="CH",
+        collection="SR",
+        number="220",
         lang="de",
         act_name="Code of Obligations",
         abbrev="OR / CO",
         version_date=date(2026, 1, 1),
-        eli="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de",
+        source_url="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de",
         file_url="https://fedlex.data.admin.ch/filestore/example/de-xml.xml",
+        source="fedlex",
     )
 
 
@@ -29,13 +32,15 @@ def test_chunk_json_roundtrip() -> None:
     from ingestion.models import Chunk
 
     chunk = Chunk(
-        sr="220",
+        jurisdiction="CH",
+        collection="SR",
+        number="220",
         lang="de",
         article="335c",
         eid="art_335_c",
         heading="Kündigungsfristen",
         text="Art. 335c\n1 Beispieltext.",
-        eli="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
+        source_url="https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_335_c",
         act_name="Code of Obligations",
         abbrev="OR / CO",
         version_date=date(2026, 1, 1),

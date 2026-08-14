@@ -19,9 +19,13 @@ def _write_chunk_file(path: Path, chunks: list[dict]) -> None:
     )
 
 
-def _chunk(sr: str, article: str, lang: str = "de") -> dict:
+def _chunk(
+    number: str, article: str, lang: str = "de", collection: str = "SR", jurisdiction: str = "ch"
+) -> dict:
     return {
-        "sr": sr,
+        "jurisdiction": jurisdiction,
+        "collection": collection,
+        "number": number,
         "lang": lang,
         "article": article,
         "eid": f"art_{article}",
@@ -32,11 +36,11 @@ def _chunk(sr: str, article: str, lang: str = "de") -> dict:
 class TestSampleChunks:
     def test_samples_requested_count_from_matching_lang_only(self, tmp_path):
         _write_chunk_file(
-            tmp_path / "220" / "de.jsonl",
+            tmp_path / "ch" / "220" / "de.jsonl",
             [_chunk("220", "1"), _chunk("220", "2"), _chunk("220", "3")],
         )
         _write_chunk_file(
-            tmp_path / "220" / "fr.jsonl", [_chunk("220", "1", lang="fr")]
+            tmp_path / "ch" / "220" / "fr.jsonl", [_chunk("220", "1", lang="fr")]
         )
 
         chunks = sample_chunks(tmp_path, "de", count=2, rng=random.Random(0))
@@ -45,30 +49,42 @@ class TestSampleChunks:
         assert all(chunk["lang"] == "de" for chunk in chunks)
 
     def test_caps_at_available_pool_size_without_raising(self, tmp_path):
-        _write_chunk_file(tmp_path / "220" / "de.jsonl", [_chunk("220", "1")])
+        _write_chunk_file(tmp_path / "ch" / "220" / "de.jsonl", [_chunk("220", "1")])
 
         chunks = sample_chunks(tmp_path, "de", count=10, rng=random.Random(0))
 
         assert len(chunks) == 1
 
     def test_samples_across_multiple_acts(self, tmp_path):
-        _write_chunk_file(tmp_path / "220" / "de.jsonl", [_chunk("220", "1")])
-        _write_chunk_file(tmp_path / "210" / "de.jsonl", [_chunk("210", "14")])
+        _write_chunk_file(tmp_path / "ch" / "220" / "de.jsonl", [_chunk("220", "1")])
+        _write_chunk_file(tmp_path / "ch" / "210" / "de.jsonl", [_chunk("210", "14")])
 
         chunks = sample_chunks(tmp_path, "de", count=2, rng=random.Random(0))
 
-        srs = {chunk["sr"] for chunk in chunks}
-        assert srs == {"220", "210"}
+        numbers = {chunk["number"] for chunk in chunks}
+        assert numbers == {"220", "210"}
+
+    def test_samples_across_jurisdictions(self, tmp_path):
+        _write_chunk_file(tmp_path / "ch" / "220" / "de.jsonl", [_chunk("220", "1")])
+        _write_chunk_file(
+            tmp_path / "sg" / "811.1" / "de.jsonl",
+            [_chunk("811.1", "2", collection="sGS", jurisdiction="sg")],
+        )
+
+        chunks = sample_chunks(tmp_path, "de", count=2, rng=random.Random(0))
+
+        jurisdictions = {chunk["jurisdiction"] for chunk in chunks}
+        assert jurisdictions == {"ch", "sg"}
 
     def test_raises_when_no_chunks_found_for_lang(self, tmp_path):
-        _write_chunk_file(tmp_path / "220" / "de.jsonl", [_chunk("220", "1")])
+        _write_chunk_file(tmp_path / "ch" / "220" / "de.jsonl", [_chunk("220", "1")])
 
         with pytest.raises(ValueError, match="no chunks"):
             sample_chunks(tmp_path, "fr", count=1, rng=random.Random(0))
 
     def test_is_deterministic_given_the_same_seeded_rng(self, tmp_path):
         _write_chunk_file(
-            tmp_path / "220" / "de.jsonl",
+            tmp_path / "ch" / "220" / "de.jsonl",
             [_chunk("220", str(n)) for n in range(20)],
         )
 
@@ -178,6 +194,14 @@ class TestBuildGoldRow:
             "expected_keywords": ["Kündigung", "Monat"],
             "must_refuse": False,
         }
+
+    def test_uses_collection_and_number_for_cantonal_chunks(self):
+        chunk = _chunk("811.1", "2", lang="de", collection="sGS")
+        parsed = {"question": "Q?", "keywords": ["a", "b"]}
+
+        row = build_gold_row(chunk, parsed, index=1)
+
+        assert row["expected_sources"] == ["sGS 811.1 Art. 2"]
 
     def test_id_uses_the_chunks_own_language_not_a_passed_in_one(self):
         chunk = _chunk("220", "41", lang="it")

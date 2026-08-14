@@ -19,12 +19,15 @@ const USER_MESSAGE: StoredMessage = {
 };
 
 const SOURCE = {
-  sr: "220",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "220",
   article: "335c",
   heading: "Kündigungsfrist",
-  eli: "https://example.test/220",
+  sourceUrl: "https://example.test/220",
   lang: "de",
   score: 6.9,
+  citationLabel: "SR 220 Art. 335c",
 };
 
 const ASSISTANT_MESSAGE: StoredMessage = {
@@ -104,11 +107,27 @@ describe("exporter.toMarkdown", () => {
     const second: StoredMessage = {
       ...ASSISTANT_MESSAGE,
       id: "m4",
-      sourcesJson: JSON.stringify([SOURCE, { ...SOURCE, sr: "210", article: "1" }]),
+      sourcesJson: JSON.stringify([
+        SOURCE,
+        { ...SOURCE, number: "210", article: "1", citationLabel: "SR 210 Art. 1" },
+      ]),
     };
     const md = toMarkdown(CONVERSATION, [second]);
     expect(md).toContain("- SR 220 Art. 335c");
     expect(md).toContain("- SR 210 Art. 1");
+  });
+
+  it("renders a cantonal source's own citation label", () => {
+    const cantonal: StoredMessage = {
+      ...ASSISTANT_MESSAGE,
+      id: "m6",
+      content: "Steuern regelt [sGS 811.1 Art. 2].",
+      sourcesJson: JSON.stringify([
+        { ...SOURCE, jurisdiction: "sg", collection: "sGS", number: "811.1", article: "2", citationLabel: "sGS 811.1 Art. 2" },
+      ]),
+    };
+    const md = toMarkdown(CONVERSATION, [cantonal]);
+    expect(md).toContain("- sGS 811.1 Art. 2");
   });
 
   it("handles an empty conversation", () => {
@@ -117,8 +136,8 @@ describe("exporter.toMarkdown", () => {
 
   it("omits stale sourcesJson on a stored refusal answer that cites nothing", () => {
     // Pre-change data: sourcesJson still holds the retrieved articles even
-    // though the refusal text has no [SR ... Art. ...] citation. The export
-    // must not leak them, mirroring useChat's loadConversation rule.
+    // though the refusal text has no [collection ... Art. ...] citation. The
+    // export must not leak them, mirroring useChat's loadConversation rule.
     const md = toMarkdown(CONVERSATION, [REFUSAL_WITH_STALE_SOURCES]);
     expect(md).not.toContain("- SR");
     expect(md).toBe(

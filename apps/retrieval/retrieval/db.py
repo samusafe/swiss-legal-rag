@@ -6,13 +6,18 @@ from pydantic import BaseModel
 
 from retrieval.config import Settings
 
-_COLUMNS = "id, sr, lang, article, part, eid, heading, context, text, eli, act_name, abbrev, version_date"
+_COLUMNS = (
+    "id, jurisdiction, collection, number, lang, article, part, eid, heading, "
+    "context, text, source_url, act_name, abbrev, version_date"
+)
 _TS_CONFIGS = {"de": "german", "fr": "french", "it": "italian"}
 
 
 class ChunkRow(BaseModel):
     id: int
-    sr: str
+    jurisdiction: str
+    collection: str
+    number: str
     lang: str
     article: str
     part: int | None
@@ -20,7 +25,7 @@ class ChunkRow(BaseModel):
     heading: str | None
     context: str | None
     text: str
-    eli: str
+    source_url: str
     act_name: str
     abbrev: str
     version_date: date
@@ -45,48 +50,60 @@ def _rows(cur: psycopg.Cursor) -> list[ChunkRow]:
     return [r.model_copy(update={"part": r.part or None}) for r in rows]
 
 
-def dense_search(conn: psycopg.Connection, embedding: list[float], k: int) -> list[ChunkRow]:
+def dense_search(
+    conn: psycopg.Connection, embedding: list[float], k: int, jurisdictions: list[str]
+) -> list[ChunkRow]:
+    # No lang filter here by design: embeddings are cross-lingual (bge-m3), so the
+    # dense arm searches across all languages. The FTS arm below is the one that
+    # filters by lang.
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_COLUMNS} FROM chunks WHERE embedding IS NOT NULL "
+            f"SELECT {_COLUMNS} FROM chunks "
+            "WHERE embedding IS NOT NULL AND jurisdiction = ANY(%s) "
             "ORDER BY embedding <=> %s::vector LIMIT %s",
-            (embedding, k),
+            (jurisdictions, embedding, k),
         )
         return _rows(cur)
 
 
-def fts_search(conn: psycopg.Connection, q: str, lang: str, k: int) -> list[ChunkRow]:
+def fts_search(
+    conn: psycopg.Connection, q: str, lang: str, k: int, jurisdictions: list[str]
+) -> list[ChunkRow]:
     if lang not in _TS_CONFIGS:
         raise ValueError(f"unsupported lang {lang!r}; expected one of {sorted(_TS_CONFIGS)}")
     config = _TS_CONFIGS[lang]
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT {_COLUMNS} FROM chunks, websearch_to_tsquery(%s::regconfig, %s) query "
-            "WHERE tsv @@ query AND lang = %s ORDER BY ts_rank_cd(tsv, query) DESC LIMIT %s",
-            (config, q, lang, k),
+            "WHERE tsv @@ query AND lang = %s AND jurisdiction = ANY(%s) "
+            "ORDER BY ts_rank_cd(tsv, query) DESC LIMIT %s",
+            (config, q, lang, jurisdictions, k),
         )
         return _rows(cur)
 
 
 def article_rows(
-    conn: psycopg.Connection, sr: str, article: str, lang: str
+    conn: psycopg.Connection, jurisdiction: str, number: str, article: str, lang: str
 ) -> list[ChunkRow]:
     """All stored parts of one article in one language, in document order."""
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT {_COLUMNS} FROM chunks "
-            "WHERE sr = %s AND lower(article) = lower(%s) AND lang = %s "
-            "ORDER BY part",
-            (sr, article, lang),
+            "WHERE jurisdiction = %s AND number = %s AND lower(article) = lower(%s) "
+            "AND lang = %s ORDER BY part",
+            (jurisdiction, number, article, lang),
         )
         return _rows(cur)
 
 
-def article_langs(conn: psycopg.Connection, sr: str, article: str) -> list[str]:
+def article_langs(
+    conn: psycopg.Connection, jurisdiction: str, number: str, article: str
+) -> list[str]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT lang FROM chunks "
-            "WHERE sr = %s AND lower(article) = lower(%s) ORDER BY lang",
-            (sr, article),
+            "WHERE jurisdiction = %s AND number = %s AND lower(article) = lower(%s) "
+            "ORDER BY lang",
+            (jurisdiction, number, article),
         )
         return [row[0] for row in cur.fetchall()]

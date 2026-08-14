@@ -20,6 +20,8 @@ import { t, useLang } from "../i18n";
 import type { Lang } from "../i18n";
 import type { Conversation, StoredMessage } from "../lib/db";
 import { toJson, toMarkdown } from "../lib/exporter";
+import { CANTONS, COVERED_CANTONS, getJurisdiction, setJurisdiction } from "../lib/jurisdiction";
+import type { Jurisdiction } from "../lib/jurisdiction";
 import { prefs } from "../lib/prefs";
 import { logAudit } from "../lib/audit";
 import { ActivityPanel } from "./ActivityPanel";
@@ -83,6 +85,23 @@ export function firstSelectionKey(keys: "all" | Set<Key> | string): string | nul
   return typeof first === "string" ? first : null;
 }
 
+// Exported for direct unit testing — same reasoning as firstSelectionKey/isLang:
+// this is the jurisdiction Select's onSelectionChange mapping, pulled out
+// because its overlay (where a canton is actually picked) can't be driven
+// interactively inside a Modal under jsdom (see SettingsModal.test.tsx).
+export function jurisdictionFromSelection(key: string): Jurisdiction {
+  return { canton: key === "none" ? null : key, commune: null };
+}
+
+// Same reasoning: the "federal only" badge lives in a SelectItem's
+// `description`, which only mounts once that (jsdom-unopenable) overlay is
+// open — pulled out so the mapping itself stays directly testable.
+export function cantonDescription(code: string): string | undefined {
+  return COVERED_CANTONS.includes(code as (typeof COVERED_CANTONS)[number])
+    ? undefined
+    : t("settings.jurisdictionFederalOnly");
+}
+
 // Enabling notifications asks the OS for permission right away, so the user
 // finds out immediately whether the toggle will actually do anything.
 // Dynamically imported — same reasoning as useChat's notifyCompletion: keeps
@@ -97,6 +116,7 @@ async function requestNotificationPermission(): Promise<void> {
 function GeneralTab() {
   const { lang, setLang } = useLang();
   const [notify, setNotify] = useState(() => prefs.get("notify", true));
+  const [jurisdiction, setJurisdictionState] = useState(getJurisdiction);
 
   return (
     <div className="flex flex-col gap-4 py-2">
@@ -112,6 +132,26 @@ function GeneralTab() {
           <SelectItem key={code}>{LANG_LABELS[code]}</SelectItem>
         ))}
       </Select>
+      <Select
+        label={t("settings.jurisdiction")}
+        selectedKeys={new Set([jurisdiction.canton ?? "none"])}
+        onSelectionChange={(keys) => {
+          const key = firstSelectionKey(keys);
+          if (key === null) return;
+          setJurisdiction(jurisdictionFromSelection(key));
+          setJurisdictionState(getJurisdiction());
+        }}
+      >
+        {[
+          <SelectItem key="none">{t("settings.jurisdictionNone")}</SelectItem>,
+          ...CANTONS.map((c) => (
+            <SelectItem key={c.code} description={cantonDescription(c.code)}>
+              {c.name}
+            </SelectItem>
+          )),
+        ]}
+      </Select>
+      <p className="text-xs text-foreground-400">{t("settings.jurisdictionHint")}</p>
       <Switch
         isSelected={notify}
         onValueChange={(next) => {

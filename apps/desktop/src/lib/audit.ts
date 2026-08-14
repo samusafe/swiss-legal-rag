@@ -7,7 +7,8 @@ export type AuditType =
   | "search.query"
   | "article.open"
   | "article.langSwitch"
-  | "article.fedlex"
+  | "article.external"
+  | "settings.jurisdiction"
   | "convo.create"
   | "convo.rename"
   | "convo.delete"
@@ -21,7 +22,7 @@ export type AuditType =
 export const AUDIT_GROUPS = {
   chat: ["chat.question", "chat.answer"],
   search: ["search.query"],
-  reading: ["article.open", "article.langSwitch", "article.fedlex"],
+  reading: ["article.open", "article.langSwitch", "article.external"],
   management: [
     "convo.create",
     "convo.rename",
@@ -30,11 +31,26 @@ export const AUDIT_GROUPS = {
     "ingest.start",
     "ingest.finish",
     "ingest.error",
+    "settings.jurisdiction",
   ],
   errors: ["error.ui", "error.api"],
 } as const satisfies Record<string, readonly AuditType[]>;
 
 export type AuditGroup = keyof typeof AUDIT_GROUPS;
+
+// Retired AuditType values that may still exist in historical rows written
+// before a migration (e.g. "article.fedlex", replaced by "article.external").
+// Never re-added to AuditType or AUDIT_GROUPS — nothing new is ever written
+// under them — but queryAudit/auditSummary fold them into their old group so
+// historical rows stay visible under the "reading" filter and its counts
+// instead of silently disappearing (spec: old rows keep their type).
+const LEGACY_TYPE_GROUPS: Record<AuditGroup, readonly string[]> = {
+  chat: [],
+  search: [],
+  reading: ["article.fedlex"],
+  management: [],
+  errors: [],
+};
 
 export const AUDIT_PAGE_SIZE = 50;
 
@@ -123,7 +139,7 @@ export async function queryAudit(
   const params: unknown[] = [sinceIso(sinceDays)];
   let typeFilter = "";
   if (group !== null) {
-    const types = AUDIT_GROUPS[group];
+    const types: readonly string[] = [...AUDIT_GROUPS[group], ...LEGACY_TYPE_GROUPS[group]];
     typeFilter = ` AND a.type IN (${types.map((_, i) => `$${i + 2}`).join(", ")})`;
     params.push(...types);
   }
@@ -157,6 +173,9 @@ export async function auditSummary(): Promise<
   const conn = await getDb();
   const groupOf = new Map<string, AuditGroup>();
   for (const [group, types] of Object.entries(AUDIT_GROUPS)) {
+    for (const type of types) groupOf.set(type, group as AuditGroup);
+  }
+  for (const [group, types] of Object.entries(LEGACY_TYPE_GROUPS)) {
     for (const type of types) groupOf.set(type, group as AuditGroup);
   }
   for (const [days, key] of [

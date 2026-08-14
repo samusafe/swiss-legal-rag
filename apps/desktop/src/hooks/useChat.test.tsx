@@ -43,19 +43,23 @@ async function* events(list: ChatEvent[]): AsyncGenerator<ChatEvent> {
 }
 
 const SOURCE = {
-  sr: "220",
+  jurisdiction: "ch",
+  collection: "SR",
+  number: "220",
   article: "335c",
   heading: "h",
-  eli: "https://example.test/e",
+  sourceUrl: "https://example.test/e",
   lang: "de",
   score: 6.9,
+  citationLabel: "SR 220 Art. 335c",
 };
 const CITATION = {
   raw: "[SR 220 Art. 335c]",
   label: "SR 220 Art. 335c",
-  sr: "220",
+  collection: "SR",
+  number: "220",
   article: "335c",
-  eli: "https://example.test/e",
+  sourceUrl: "https://example.test/e",
   resolved: true,
 };
 
@@ -736,9 +740,10 @@ describe("useChat persistence", () => {
           {
             raw: "[SR 210 Art. 1]",
             label: "SR 210 Art. 1",
-            sr: "210",
+            collection: "SR",
+            number: "210",
             article: "1",
-            eli: null,
+            sourceUrl: null,
             resolved: false,
           },
         ],

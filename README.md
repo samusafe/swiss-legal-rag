@@ -6,7 +6,7 @@
 
 # Swiss Legal RAG
 
-### Local, cited answers over Swiss federal law
+### Local, cited answers over Swiss federal and cantonal law (pilot: SG, BE)
 
 [![Status: Open Source Alpha](https://img.shields.io/badge/status-open--source%20alpha-2563eb?style=flat-square)](#project-status)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](#requirements)
@@ -24,18 +24,29 @@ Ask in German, French, Italian, or another detected language. Retrieve official 
 
 ## Why it exists
 
-Swiss federal law is published across multiple official languages and changes over time. This project is an end-to-end reference implementation for trustworthy local RAG: it ingests official structured legal text, retrieves evidence with hybrid search, requires article-level citations, and evaluates the result with a version-controlled gold dataset.
+Swiss law is published across multiple official languages, at both the federal and cantonal level, and changes over time. This project is an end-to-end reference implementation for trustworthy local RAG: it ingests official structured legal text, retrieves evidence with hybrid search, requires article-level citations, and evaluates the result with a version-controlled gold dataset.
 
 It is designed for a trusted local user, not for an internet-facing legal service.
+
+## Coverage
+
+| Jurisdiction | Acts | Languages | Source |
+| --- | --- | --- | --- |
+| CH (federal) | 10 | DE, FR, IT | Fedlex, Akoma Ntoso XML via SPARQL |
+| SG (canton, pilot) | 8 | DE | St. Gallen LexWork JSON API |
+| BE (canton, pilot) | 8 | DE, FR | Bern LexWork JSON API |
+
+Selecting a canton in the desktop client's Settings > Jurisdiction (or passing `canton` to `/search`/`/chat`) includes that canton's law alongside the federal corpus; the full list of acts per jurisdiction lives in `corpus.yaml`. Uncovered cantons remain federal-law-only until a future ingest adds them.
 
 ## Highlights
 
 | Capability | What it does |
 | --- | --- |
-| Cross-lingual retrieval | Searches German, French, and Italian federal-law texts; dense retrieval supports questions beyond the FTS languages. |
+| Cross-lingual retrieval | Searches German, French, and Italian legal texts across federal and cantonal corpora; dense retrieval supports questions beyond the FTS languages. |
 | Evidence-first answers | Gives the model only retrieved source blocks and refuses deterministically when no source is retrieved. |
 | Hybrid retrieval | Combines pgvector cosine search, PostgreSQL full-text search, reciprocal-rank fusion, and a cross-encoder reranker. |
-| Traceable output | Uses `[SR <number> Art. <article>]` citations resolved to official Fedlex ELI links. |
+| Traceable output | Uses `[<collection> <number> Art. <article>]` citations (`SR 220 Art. 335c` federal, `BSG 661.11 Art. 2` cantonal) resolved to the source's official portal link. |
+| Jurisdiction-aware | An optional canton setting (desktop Settings > Jurisdiction, or the `canton` request parameter) adds that canton's law to federal results; uncovered cantons stay federal-only. |
 | Local desktop workflow | Tauri + React client with a five-language UI, persistent conversation history, clickable citation chips and an in-app article reader (DE/FR/IT, full text), and streamed answers with progress feedback for corpus ingestion. |
 | Measurable quality | A 33-question DE/FR/IT seed dataset measures retrieval, citations, keywords, and refusal behavior. |
 
@@ -44,6 +55,7 @@ It is designed for a trusted local user, not for an internet-facing legal servic
 ```mermaid
 flowchart LR
     F[Fedlex SPARQL and XML] --> I[Ingestion CLI]
+    L[Cantonal LexWork JSON APIs] --> I
     I --> P[(PostgreSQL + pgvector)]
     Q[Question] --> R[FastAPI retrieval API]
     P --> R
@@ -59,7 +71,7 @@ apps/
   desktop/     Tauri 2 + React local client
   evals/       Gold dataset, scoring, comparison, and draft tooling
 db/init/       PostgreSQL + pgvector bootstrap SQL
-corpus.yaml    Selected federal acts and source metadata
+corpus.yaml    Jurisdiction blocks (federal + cantonal) of selected acts and source metadata
 ```
 
 ## Quick start
@@ -86,6 +98,8 @@ ollama pull qwen2.5:3b-instruct
 
 ### 2. Build the corpus
 
+The pipeline reads `corpus.yaml` — one jurisdiction block per source (`CH` for federal, `SG`/`BE` for the cantonal pilots), each listing its own acts, languages, and source (`fedlex` or `lexwork`). The same four commands build every jurisdiction block in one run; there's no separate step per canton.
+
 <details>
 <summary>macOS / Linux</summary>
 
@@ -111,6 +125,8 @@ ingest resolve; ingest fetch; ingest parse; ingest embed
 ```
 
 </details>
+
+Adding an act to an existing jurisdiction, or a new cantonal pilot, is one entry (or one block) in `corpus.yaml` — see `apps/ingestion/README.md` for the `fedlex`/`lexwork` source contract.
 
 ### 3. Start the API
 
@@ -152,8 +168,8 @@ The first baseline scorecard (retrieval-only, then full chat mode) is queued aga
 
 ## Scope and safety boundaries
 
-- **Federal corpus only.** The current corpus is selected in `corpus.yaml`; cantonal and communal law are out of scope.
-- **Official-source links, not legal conclusions.** Citations lead to the relevant official Fedlex version; source selection and generated interpretation still require human review.
+- **Federal law plus a two-canton pilot.** The current corpus is selected in `corpus.yaml` — federal law (CH) and a St. Gallen/Bern cantonal pilot (see Coverage above); other cantons and communal law are out of scope.
+- **Official-source links, not legal conclusions.** Citations lead to the relevant official version — Fedlex for federal acts, the canton's own LexWork portal for cantonal acts; source selection and generated interpretation still require human review.
 - **Local single-user deployment.** Authentication (`API_KEY`) and per-IP rate limiting (`RATE_LIMIT_PER_MINUTE`) are optional and off by default; neither is authorization or tenant isolation. Keep it on `127.0.0.1` regardless — see `apps/retrieval/README.md` Security.
 - **Liveness vs. readiness.** `/health` confirms that the HTTP service responds. `GET /ready` checks PostgreSQL, Ollama (chat + embedding models pulled), and a non-empty embedded corpus, returning `503` if any check fails.
 - **Configurable, increasingly reproducible.** `apps/retrieval` and `apps/evals` pin exact Python dependency versions; the reranker supports pinning by revision (`RERANKER_REVISION`). Ollama model tags are still mutable — see `apps/retrieval/README.md` Reproducibility for pinning by digest. Record exact versions before comparing runs.
@@ -187,7 +203,7 @@ Default tests are designed to run offline. Live Fedlex and database integration 
 
 ## Data, provenance, and licensing
 
-The code is licensed under [MIT](LICENSE). Legal source text and metadata originate from [Fedlex](https://www.fedlex.admin.ch/). Swiss copyright law excludes official enactments and official collections/translations from copyright protection under [Art. 5 CopA](https://www.fedlex.admin.ch/eli/cc/1993/1798_1798_1798/en?version=20250701); nevertheless, retain provenance and verify the current Fedlex data and attribution terms before redistributing derived corpus material.
+The code is licensed under [MIT](LICENSE). Legal source text and metadata originate from [Fedlex](https://www.fedlex.admin.ch/) for federal law and from each pilot canton's own official LexWork collection (St. Gallen, Bern) for cantonal law. Swiss copyright law excludes official enactments and official collections/translations from copyright protection under [Art. 5 CopA](https://www.fedlex.admin.ch/eli/cc/1993/1798_1798_1798/en?version=20250701); nevertheless, retain provenance and verify the current source data and attribution terms (federal or cantonal) before redistributing derived corpus material.
 
 ## Contributing
 

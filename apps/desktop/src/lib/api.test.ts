@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "./api";
-import { getHealth, postChat } from "./api";
+import { fetchArticle, getHealth, postChat } from "./api";
 
 vi.mock("./audit", () => ({
   logAudit: vi.fn(),
 }));
 
 import { logAudit } from "./audit";
+import { setJurisdiction } from "./jurisdiction";
 
 const logAuditMock = vi.mocked(logAudit);
 
@@ -31,6 +32,10 @@ async function collect(question = "q"): Promise<ChatEvent[]> {
   return events;
 }
 
+beforeEach(() => {
+  localStorage.clear();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   logAuditMock.mockReset();
@@ -39,26 +44,51 @@ afterEach(() => {
 describe("postChat", () => {
   it("yields sources, thinking, token and done events in order", async () => {
     const body =
-      'event: sources\ndata: {"sources": [{"sr": "220", "article": "335c", "heading": "h", "eli": "https://example.test/e", "lang": "de", "score": 6.9}]}\n\n' +
+      'event: sources\ndata: {"sources": [{"jurisdiction": "CH", "collection": "SR", "number": "220", "article": "335c", "heading": "h", "source_url": "https://example.test/e", "lang": "de", "score": 6.9, "citation_label": "SR 220 Art. 335c"}]}\n\n' +
       'event: thinking\ndata: {"delta": "checking Art. 335c… "}\n\n' +
       'event: token\ndata: {"delta": "Hallo"}\n\n' +
-      'event: done\ndata: {"citations": [], "model": "qwen3:4b", "duration_ms": 12}\n\n';
+      'event: done\ndata: {"citations": [{"raw": "[SR 220 Art. 335c]", "label": "SR 220 Art. 335c", "collection": "SR", "number": "220", "article": "335c", "source_url": "https://example.test/e", "resolved": true}], "model": "qwen3:4b", "duration_ms": 12}\n\n';
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(body)));
 
     expect(await collect()).toEqual([
       {
         type: "sources",
         sources: [
-          { sr: "220", article: "335c", heading: "h", eli: "https://example.test/e", lang: "de", score: 6.9 },
+          {
+            jurisdiction: "CH",
+            collection: "SR",
+            number: "220",
+            article: "335c",
+            heading: "h",
+            sourceUrl: "https://example.test/e",
+            lang: "de",
+            score: 6.9,
+            citationLabel: "SR 220 Art. 335c",
+          },
         ],
       },
       { type: "thinking", delta: "checking Art. 335c… " },
       { type: "token", delta: "Hallo" },
-      { type: "done", citations: [], model: "qwen3:4b", durationMs: 12 },
+      {
+        type: "done",
+        citations: [
+          {
+            raw: "[SR 220 Art. 335c]",
+            label: "SR 220 Art. 335c",
+            collection: "SR",
+            number: "220",
+            article: "335c",
+            sourceUrl: "https://example.test/e",
+            resolved: true,
+          },
+        ],
+        model: "qwen3:4b",
+        durationMs: 12,
+      },
     ]);
   });
 
-  it("posts only the question to /chat", async () => {
+  it("posts the question and canton (null by default) to /chat", async () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(""));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -68,7 +98,23 @@ describe("postChat", () => {
       "http://localhost:8000/chat",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ question: "Kündigungsfrist?" }),
+        body: JSON.stringify({ question: "Kündigungsfrist?", canton: null }),
+      }),
+    );
+  });
+
+  it("posts the selected canton to /chat after setJurisdiction", async () => {
+    setJurisdiction({ canton: "SG", commune: null });
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(""));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await collect("Kündigungsfrist?");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/chat",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Kündigungsfrist?", canton: "SG" }),
       }),
     );
   });
@@ -117,20 +163,28 @@ describe("postChat", () => {
 import { search } from "./api";
 
 describe("search", () => {
-  it("posts q/k/lang to /search and maps snake_case results to camelCase", async () => {
+  it("posts q/k/lang/canton to /search and maps snake_case results to camelCase", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           results: [
             {
-              sr: "220",
+              jurisdiction: "CH",
+              collection: "SR",
+              number: "220",
+              lang: "de",
               article: "335c",
+              part: null,
+              eid: "art_335c",
               heading: "Kündigung",
               context: "Die Kündigungsfrist…",
               text: "full text",
-              eli: "https://example.test/e",
+              source_url: "https://example.test/e",
               act_name: "Obligationenrecht",
+              abbrev: "OR",
+              version_date: "2024-01-01",
               score: 6.9,
+              citation_label: "SR 220 Art. 335c",
             },
           ],
           took_ms: { embed: 1, search: 2, rerank: 3 },
@@ -146,21 +200,41 @@ describe("search", () => {
       "http://localhost:8000/search",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ q: "Kündigungsfrist", k: 8, lang: "de" }),
+        body: JSON.stringify({ q: "Kündigungsfrist", k: 8, lang: "de", canton: null }),
       }),
     );
     expect(results).toEqual([
       {
-        sr: "220",
+        jurisdiction: "CH",
+        collection: "SR",
+        number: "220",
         article: "335c",
         heading: "Kündigung",
         context: "Die Kündigungsfrist…",
         text: "full text",
-        eli: "https://example.test/e",
+        sourceUrl: "https://example.test/e",
         actName: "Obligationenrecht",
         score: 6.9,
+        citationLabel: "SR 220 Art. 335c",
       },
     ]);
+  });
+
+  it("posts the selected canton to /search after setJurisdiction", async () => {
+    setJurisdiction({ canton: "SG", commune: null });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ results: [], took_ms: {} }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await search("q", 8, "de");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/search",
+      expect.objectContaining({
+        body: JSON.stringify({ q: "q", k: 8, lang: "de", canton: "SG" }),
+      }),
+    );
   });
 
   it("throws the backend detail on failure", async () => {
@@ -207,6 +281,67 @@ describe("search", () => {
     expect(logAuditMock).toHaveBeenCalledWith(
       "error.api",
       expect.objectContaining({ requestId: "b3f1a2c4-0000-4000-8000-000000000000" }),
+    );
+  });
+});
+
+describe("fetchArticle", () => {
+  it("GETs /article with jurisdiction/number/article/lang and maps snake_case to camelCase", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jurisdiction: "CH",
+          collection: "SR",
+          number: "220",
+          article: "335c",
+          lang: "de",
+          heading: "Kündigung",
+          act_name: "Obligationenrecht",
+          abbrev: "OR",
+          source_url: "https://example.test/e",
+          version_date: "2024-01-01",
+          texts: ["full text"],
+          available_langs: ["de", "fr"],
+          citation_label: "SR 220 Art. 335c",
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const article = await fetchArticle("CH", "220", "335c", "de");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/article?jurisdiction=CH&number=220&article=335c&lang=de",
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+    expect(article).toEqual({
+      jurisdiction: "CH",
+      collection: "SR",
+      number: "220",
+      article: "335c",
+      lang: "de",
+      heading: "Kündigung",
+      actName: "Obligationenrecht",
+      abbrev: "OR",
+      sourceUrl: "https://example.test/e",
+      versionDate: "2024-01-01",
+      texts: ["full text"],
+      availableLangs: ["de", "fr"],
+      citationLabel: "SR 220 Art. 335c",
+    });
+  });
+
+  it("throws the backend detail on a 404", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: "CH 220 Art. 999 not found" }), { status: 404 }),
+      ),
+    );
+
+    await expect(fetchArticle("CH", "220", "999", "de")).rejects.toThrow(
+      "CH 220 Art. 999 not found",
     );
   });
 });

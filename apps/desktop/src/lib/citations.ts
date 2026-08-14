@@ -42,15 +42,18 @@ export function splitCitations(text: string, citations: Citation[]): Segment[] {
 
 // Mirrors the backend's bracket/ref two-level parsing (see
 // apps/retrieval/retrieval/citations.py): brackets first, then each
-// "SR <nr> Art. <id>" reference inside — prose brackets carry no refs.
+// "<collection> <nr> Art. <id>" reference inside — prose brackets carry no
+// refs. The collection token is broader than the old "SR"-only match
+// (federal AND cantonal collections, e.g. "sGS"); resolution against real
+// sources is the safety net — an unresolved ref just renders as unlinked.
 const BRACKET_RE = /\[([^\]]+)\]/g;
-const REF_RE = /SR\s+([\d.]+)\s+Art\.\s*([\w.]+)/g;
+const REF_RE = /\b([A-Za-z][A-Za-z/]{0,9})\s+([\d.]+)\s+Art\.\s*([\w.]+)/g;
 
 /**
  * Mirrors the backend's extract_citations()/_resolve_by_key()
- * (apps/retrieval/retrieval/citations.py): groups sources by (sr,
- * article.lower()) — cross-lingual dense retrieval can return the same
- * article in two languages — and resolves each citation to the group's
+ * (apps/retrieval/retrieval/citations.py): groups sources by (collection,
+ * number, article.lower()) — cross-lingual dense retrieval can return the
+ * same article in two languages — and resolves each citation to the group's
  * source matching `answerLang` if any, else the group's highest-scored
  * source (first one wins on a tie, matching Python's `max()`).
  *
@@ -65,7 +68,7 @@ export function extractCitations(
 ): Citation[] {
   const groups = new Map<string, Source[]>();
   for (const source of sources) {
-    const key = `${source.sr}:${source.article.toLowerCase()}`;
+    const key = `${source.collection}:${source.number}:${source.article.toLowerCase()}`;
     const group = groups.get(key);
     if (group === undefined) groups.set(key, [source]);
     else group.push(source);
@@ -90,18 +93,20 @@ export function extractCitations(
     if (seenRaws.has(raw)) continue;
     const emitted = new Set<string>();
     for (const ref of (bracket[1] ?? "").matchAll(REF_RE)) {
-      const sr = ref[1] ?? "";
-      const article = ref[2] ?? "";
-      const key = `${sr}:${article.toLowerCase()}`;
+      const collection = ref[1] ?? "";
+      const number = ref[2] ?? "";
+      const article = ref[3] ?? "";
+      const key = `${collection}:${number}:${article.toLowerCase()}`;
       if (emitted.has(key)) continue;
       emitted.add(key);
       const source = resolved.get(key);
       citations.push({
         raw,
-        label: `SR ${sr} Art. ${article}`,
-        sr,
+        label: `${collection} ${number} Art. ${article}`,
+        collection,
+        number,
         article,
-        eli: source?.eli ?? null,
+        sourceUrl: source?.sourceUrl ?? null,
         resolved: source !== undefined,
       });
     }

@@ -1,7 +1,6 @@
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { ArticleDocModal } from "./components/ArticleDocModal";
-import type { ArticleRef } from "./components/ArticleDocModal";
 import { Composer } from "./components/Composer";
 import { Header } from "./components/Header";
 import { MessageList } from "./components/MessageList";
@@ -20,6 +19,7 @@ import { usePrefersReducedMotion } from "./hooks/usePrefersReducedMotion";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTheme } from "./hooks/useTheme";
 import { dedupe, toArticleRef } from "./lib/sources";
+import type { ArticleRef } from "./lib/sources";
 import { prefs } from "./lib/prefs";
 import { logAudit } from "./lib/audit";
 
@@ -120,8 +120,9 @@ export default function App() {
   } | null>(null);
 
   const handleOpenSource = useCallback((list: Source[], index: number) => {
-    const opened = toArticleRef(list[index]);
-    logAudit("article.open", { ...opened, origin: "card" });
+    const source = list[index];
+    const opened = toArticleRef(source);
+    logAudit("article.open", { ...opened, collection: source.collection, origin: "card" });
     setArticleTarget({ refs: list.map(toArticleRef), index });
   }, []);
 
@@ -129,36 +130,46 @@ export default function App() {
     const list = dedupe(message.sources ?? []);
     const index = list.findIndex(
       (s) =>
-        s.sr === citation.sr &&
+        s.collection === citation.collection &&
+        s.number === citation.number &&
         s.article.toLowerCase() === citation.article.toLowerCase(),
     );
     if (index === -1) return; // resolved citations always match, but stay safe
-    const opened = toArticleRef(list[index]);
-    logAudit("article.open", { ...opened, origin: "chip" });
+    const source = list[index];
+    const opened = toArticleRef(source);
+    logAudit("article.open", { ...opened, collection: source.collection, origin: "chip" });
     setArticleTarget({ refs: list.map(toArticleRef), index });
   }, []);
 
   const handleSearchSelect = useCallback(
     (results: SearchResult[], index: number) => {
       // Results may repeat an article (split parts); keep the first occurrence
-      // per (sr, article) and point the modal at the clicked one's slot.
+      // per (jurisdiction, number, article) and point the modal at the
+      // clicked one's slot.
       const searchLang = toSearchLang(lang);
       const refs: ArticleRef[] = [];
       const slotByKey = new Map<string, number>();
       let targetIndex = 0;
       for (const [i, result] of results.entries()) {
-        const key = `${result.sr}:${result.article.toLowerCase()}`;
+        const key = `${result.jurisdiction}:${result.number}:${result.article.toLowerCase()}`;
         let slot = slotByKey.get(key);
         if (slot === undefined) {
           slot = refs.length;
           slotByKey.set(key, slot);
-          refs.push({ sr: result.sr, article: result.article, lang: searchLang });
+          refs.push({
+            jurisdiction: result.jurisdiction,
+            number: result.number,
+            article: result.article,
+            lang: searchLang,
+          });
         }
         if (i === index) targetIndex = slot;
       }
       const opened = results[index];
       logAudit("article.open", {
-        sr: opened.sr,
+        jurisdiction: opened.jurisdiction,
+        collection: opened.collection,
+        number: opened.number,
         article: opened.article,
         lang: searchLang,
         origin: "palette",

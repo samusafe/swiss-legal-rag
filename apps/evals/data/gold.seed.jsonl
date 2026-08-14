@@ -1,13 +1,21 @@
 // Hand-written gold dataset. 3 languages x 11 rows (8 answerable + 3
 // must-refuse each). Every answerable row's source article was checked against
-// the indexed chunks in data/chunks/<sr>/<lang>.jsonl. Questions and keywords
-// remain human-maintained evaluation targets, not legal advice.
+// the indexed chunks in data/chunks/<jurisdiction>/<number>/<lang>.jsonl.
+// Questions and keywords remain human-maintained evaluation targets, not
+// legal advice.
 //
 // Format: one JSON object per line. Fields: id, lang ("de"|"fr"|"it"),
-// question, expected_sources (["SR <nr> Art. <x>", ...]), expected_keywords
+// question, expected_sources (["<collection> <nr> Art. <x>", ...] -- federal
+// e.g. "SR 220 Art. 335c", cantonal e.g. "sGS 811.1 Art. 2"), expected_keywords
 // (2-4 terms in the question's language that a correct answer would
 // contain), must_refuse (bool; true rows use empty expected_sources /
 // expected_keywords and need no source verification).
+//
+// This file is federal-only for now. Cantonal rows (SG/sGS, BE/BSG) are
+// deferred until the first real SG/BE ingest lands, so each row's source
+// article can be drafted against real indexed chunks (`python -m
+// evals.draft`) instead of a guessed placeholder -- see corpus.yaml and
+// docs/swiss-legal-rag.md for the cantonal pilot plan.
 {"id": "seed-de-01", "lang": "de", "question": "Wie lange ist die ordentliche Kündigungsfrist im ersten Dienstjahr nach Ablauf der Probezeit?", "expected_sources": ["SR 220 Art. 335c"], "expected_keywords": ["einen Monat", "Kündigungsfrist"], "must_refuse": false}
 {"id": "seed-de-02", "lang": "de", "question": "Ab welchem Alter gilt eine Person in der Schweiz als volljährig?", "expected_sources": ["SR 210 Art. 14"], "expected_keywords": ["18", "volljährig"], "must_refuse": false}
 {"id": "seed-de-03", "lang": "de", "question": "Wie hoch ist der Steuersatz der Kantonssteuer im Kanton Zürich für ein Einkommen über 100'000 Franken?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}

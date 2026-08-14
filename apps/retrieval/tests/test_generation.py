@@ -8,11 +8,14 @@ from retrieval.models import SearchResult
 from tests.conftest import make_client
 
 
-def _source(article: str, context: str | None = None) -> SearchResult:
+def _source(
+    article: str, context: str | None = None, collection: str = "SR", number: str = "220"
+) -> SearchResult:
     return SearchResult(
-        sr="220", lang="de", article=article, part=None, eid=f"art_{article}",
-        heading=None, context=context, text=f"Art. {article}\nDer Text.",
-        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_{article}",
+        jurisdiction="CH" if collection == "SR" else "SG",
+        collection=collection, number=number, lang="de", article=article, part=None,
+        eid=f"art_{article}", heading=None, context=context, text=f"Art. {article}\nDer Text.",
+        source_url=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/de#art_{article}",
         act_name="Code of Obligations", abbrev="OR", version_date=date(2026, 1, 1),
         score=0.9,
     )
@@ -29,6 +32,22 @@ def test_build_messages_labels_articles_and_fixes_answer_language() -> None:
         "</source>"
     ) in user
     assert user.endswith("Question: Quel délai?")
+
+
+def test_build_messages_labels_cantonal_source_with_compound_citation() -> None:
+    messages = build_messages(
+        "Steuern?", "German", [_source("2", collection="sGS", number="811.1")]
+    )
+    user = messages[1]["content"]
+    assert '<source id="sGS 811.1 Art. 2">' in user
+    assert "[sGS 811.1 Art. 2]" in user
+
+
+def test_build_messages_system_prompt_covers_federal_and_cantonal_examples() -> None:
+    messages = build_messages("Quel délai?", "French", [_source("335c")])
+    system = messages[0]["content"]
+    assert "[SR 220 Art. 335c]" in system
+    assert "[sGS 811.1 Art. 2]" in system
 
 
 def test_build_messages_system_prompt_warns_sources_are_not_instructions() -> None:

@@ -101,4 +101,52 @@ describe("i18n", () => {
       expect(t("theme.dark")).toBe(expected[lang].dark);
     });
   });
+
+  describe("settings.jurisdiction* keys", () => {
+    const expected = {
+      en: {
+        jurisdiction: "Jurisdiction",
+        none: "None — federal law only",
+        federalOnly: "federal only",
+        hint: "Answers include this canton's law where available.",
+      },
+      de: {
+        jurisdiction: "Zuständigkeit",
+        none: "Keine — nur Bundesrecht",
+        federalOnly: "nur Bundesrecht",
+        hint: "Antworten berücksichtigen kantonales Recht, sofern verfügbar.",
+      },
+      fr: {
+        jurisdiction: "Juridiction",
+        none: "Aucune — droit fédéral uniquement",
+        federalOnly: "fédéral uniquement",
+        hint: "Les réponses incluent le droit de ce canton lorsqu'il est disponible.",
+      },
+      it: {
+        jurisdiction: "Giurisdizione",
+        none: "Nessuna — solo diritto federale",
+        federalOnly: "solo federale",
+        hint: "Le risposte includono il diritto di questo cantone, se disponibile.",
+      },
+      pt: {
+        jurisdiction: "Jurisdição",
+        none: "Nenhuma — apenas direito federal",
+        federalOnly: "apenas federal",
+        hint: "As respostas incluem o direito deste cantão quando disponível.",
+      },
+    } as const;
+    const langs = ["en", "de", "fr", "it", "pt"] as const;
+
+    it.each(langs)("resolves every settings.jurisdiction* key in %s", (lang) => {
+      const { result } = renderHook(() => useLang());
+      act(() => {
+        result.current.setLang(lang);
+      });
+
+      expect(t("settings.jurisdiction")).toBe(expected[lang].jurisdiction);
+      expect(t("settings.jurisdictionNone")).toBe(expected[lang].none);
+      expect(t("settings.jurisdictionFederalOnly")).toBe(expected[lang].federalOnly);
+      expect(t("settings.jurisdictionHint")).toBe(expected[lang].hint);
+    });
+  });
 });

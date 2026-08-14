@@ -50,8 +50,8 @@ _RATE_LIMITED_PATHS = {"/search", "/chat", "/ingest", "/ingest/stop"}
 
 @dataclass
 class ArticleDeps:
-    rows: Callable[[str, str, str], list[ChunkRow]]
-    langs: Callable[[str, str], list[str]]
+    rows: Callable[[str, str, str, str], list[ChunkRow]]
+    langs: Callable[[str, str, str], list[str]]
 
 
 def _db_host(database_url: str) -> str:
@@ -97,13 +97,17 @@ def _connect_deps(app: FastAPI) -> None:
         embed=lambda text: embed_query(
             client, settings.ollama_base_url, settings.embedding_model, text
         ),
-        dense=lambda vector, k: dense_search(conn, vector, k),
-        fts=lambda q, lang, k: fts_search(conn, q, lang, k),
+        dense=lambda vector, k, jur: dense_search(conn, vector, k, jur),
+        fts=lambda q, lang, k, jur: fts_search(conn, q, lang, k, jur),
         rerank=reranker.scores,
     )
     app.state.article_deps = ArticleDeps(
-        rows=lambda sr, article, lang: article_rows(conn, sr, article, lang),
-        langs=lambda sr, article: article_langs(conn, sr, article),
+        rows=lambda jurisdiction, number, article, lang: article_rows(
+            conn, jurisdiction, number, article, lang
+        ),
+        langs=lambda jurisdiction, number, article: article_langs(
+            conn, jurisdiction, number, article
+        ),
     )
 
 
@@ -208,7 +212,9 @@ def create_app() -> FastAPI:
         try:
             if app.state.deps is None:  # dropped after a DB failure — reconnect now
                 _connect_deps(app)
-            return run_search(app.state.deps, request.q, request.k, request.lang)
+            return run_search(
+                app.state.deps, request.q, request.k, request.lang, request.canton
+            )
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except psycopg.Error as error:
@@ -223,15 +229,16 @@ def create_app() -> FastAPI:
 
     @app.get("/article")
     def get_article(
-        sr: str = Query(min_length=1),
+        jurisdiction: str = Query(min_length=1),
+        number: str = Query(min_length=1),
         article: str = Query(min_length=1),
         lang: Literal["de", "fr", "it"] = Query(),
     ) -> ArticleResponse:
         try:
             if app.state.article_deps is None:  # dropped after a DB failure
                 _connect_deps(app)
-            rows = app.state.article_deps.rows(sr, article, lang)
-            langs = app.state.article_deps.langs(sr, article)
+            rows = app.state.article_deps.rows(jurisdiction, number, article, lang)
+            langs = app.state.article_deps.langs(jurisdiction, number, article)
         except psycopg.Error as error:
             _drop_deps(app)
             host = _db_host(app.state.settings.database_url)
@@ -246,26 +253,33 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=404,
                     detail=(
-                        f"SR {sr} Art. {article} not available in '{lang}' "
+                        f"{jurisdiction} {number} Art. {article} not available in '{lang}' "
                         f"(available: {', '.join(langs)})"
                     ),
                 )
-            raise HTTPException(status_code=404, detail=f"SR {sr} Art. {article} not found")
+            raise HTTPException(
+                status_code=404, detail=f"{jurisdiction} {number} Art. {article} not found"
+            )
         first = rows[0]
         return ArticleResponse(
-            sr=first.sr,
+            jurisdiction=first.jurisdiction,
+            collection=first.collection,
+            number=first.number,
             article=first.article,
             lang=first.lang,
             heading=first.heading,
             act_name=first.act_name,
             abbrev=first.abbrev,
-            eli=first.eli,
+            source_url=first.source_url,
             version_date=first.version_date,
             texts=[row.text for row in rows],
             available_langs=langs,
         )
 
-    _SOURCE_FIELDS = {"sr", "article", "heading", "eli", "lang", "score"}
+    _SOURCE_FIELDS = {
+        "jurisdiction", "collection", "number", "article", "heading",
+        "source_url", "lang", "score", "citation_label",
+    }
     # Exact wording is part of the citation contract: the M6 evals refusal metric
     # requires this sentence verbatim, so it must never carry a [SR ...] tag.
     # REFUSAL_SENTENCE is the single source of truth (retrieval.generation).
@@ -279,7 +293,9 @@ def create_app() -> FastAPI:
         try:
             if app.state.deps is None:
                 _connect_deps(app)
-            search_response = run_search(app.state.deps, request.question, request.k, fts_lang)
+            search_response = run_search(
+                app.state.deps, request.question, request.k, fts_lang, request.canton
+            )
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except psycopg.Error as error:

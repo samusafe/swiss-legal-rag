@@ -18,7 +18,9 @@ including answerable and refusal cases). `data/gold.jsonl` is the curated run da
 intentionally created locally. `data/gold.draft*.jsonl` is ignored because LLM-generated rows
 require human verification.
 
-Each JSONL row contains `id`, `lang` (`de`, `fr`, or `it`), `question`, `expected_sources`, `expected_keywords`, and `must_refuse`. Answerable sources use `SR <number> Art. <article>`; refusal rows have no expected source. An optional `expected_source_ids` field is accepted for compatibility with upstream-authored datasets; it is stored but never scored.
+Each JSONL row contains `id`, `lang` (`de`, `fr`, or `it`), `question`, `expected_sources`, `expected_keywords`, and `must_refuse`. Answerable sources use the compound citation grammar `<collection> <number> Art. <article>` — `SR 220 Art. 335c` for a federal act, `sGS 811.1 Art. 2` for St. Gallen, `BSG 661.11 Art. 2` for Bern; refusal rows have no expected source. An optional `expected_source_ids` field is accepted for compatibility with upstream-authored datasets; it is stored but never scored.
+
+The checked-in seed set is federal-only today. Cantonal gold rows (SG/BE) are added once the corresponding canton has an ingested corpus to score against — see the root README's Coverage table for what's currently ingested.
 
 Loading is fail-closed by default (`load_gold(path)`): an unknown key, a duplicate `id` across rows, or a blank/whitespace-only `id`/`question` all abort the load with a `ValueError` naming the offending line. Pass `permissive=True` (or `--permissive-eval-set` on the CLI, see below) to instead log each bad row to stderr as `skipping line N: <reason>` and continue with the remaining rows — this still raises if no valid row remains.
 

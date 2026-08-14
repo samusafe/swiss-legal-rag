@@ -14,6 +14,7 @@ from ingestion.akoma import (
     marginal_heading,
     parse_act,
 )
+from ingestion.embed import _check_no_duplicate_keys
 from ingestion.models import Chunk, ManifestEntry
 from tests.conftest import akn_doc
 
@@ -85,13 +86,16 @@ def test_marginal_heading_absent() -> None:
 
 def entry_for(lang: str = "de") -> ManifestEntry:
     return ManifestEntry(
-        sr="220",
+        jurisdiction="CH",
+        collection="SR",
+        number="220",
         lang=lang,
         act_name="Code of Obligations",
         abbrev="OR / CO",
         version_date=date(2026, 1, 1),
-        eli=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}",
+        source_url=f"https://www.fedlex.admin.ch/eli/cc/27/317_321_377/{lang}",
         file_url="https://fedlex.data.admin.ch/filestore/example.xml",
+        source="fedlex",
     )
 
 
@@ -115,7 +119,7 @@ def test_parse_act_builds_chunks_with_anchor(tmp_path: Path) -> None:
     assert chunk.part is None
     assert chunk.heading == "Kündigungsfristen"
     assert chunk.text == "Art. 335c\n1 Text A."
-    assert chunk.eli.endswith("/de#art_335_c")
+    assert chunk.source_url.endswith("/de#art_335_c")
     assert chunk.version_date == date(2026, 1, 1)
 
 
@@ -147,7 +151,7 @@ def test_parse_act_prefers_header_number_over_duplicate_eid(tmp_path: Path) -> N
     chunks = parse_act(xml_path, entry_for())
     assert len(chunks) == 1
     assert chunks[0].article == "220"
-    assert chunks[0].eli.endswith("#art_221")
+    assert chunks[0].source_url.endswith("#art_221")
 
 
 def test_parse_act_disambiguates_duplicate_eid(tmp_path: Path) -> None:
@@ -161,11 +165,28 @@ def test_parse_act_disambiguates_duplicate_eid(tmp_path: Path) -> None:
     assert len(chunks) == 2
     by_article = {c.article: c for c in chunks}
     assert set(by_article) == {"220", "221"}
-    assert by_article["221"].eli.endswith("#art_221")
-    assert by_article["220"].eli.endswith("#art_220")
-    assert by_article["221"].eli != by_article["220"].eli
+    assert by_article["221"].source_url.endswith("#art_221")
+    assert by_article["220"].source_url.endswith("#art_220")
+    assert by_article["221"].source_url != by_article["220"].source_url
     assert by_article["221"].eid == "art_221"
-    assert by_article["220"].eid == "art_221"
+    assert by_article["220"].eid == "art_221__2"  # loser gets a distinct, collision-free eid
+
+
+def test_parse_act_disambiguated_chunks_have_unique_db_keys(tmp_path: Path) -> None:
+    # CRITICAL regression: two Fedlex elements sharing eId="art_221" (real SR 220 FR
+    # shape — also SR 220 IT has two art_219) used to leave BOTH chunks with
+    # eid=="art_221" after rehoming, colliding on the DB's
+    # (jurisdiction, number, lang, eid, part) unique key from embed.SCHEMA_SQL.
+    xml_path = write_doc(tmp_path,
+        '<article eId="art_221"><num>Art. 221</num>'
+        '<paragraph eId="art_221/para"><content><p>Text 221.</p></content></paragraph></article>'
+        '<article eId="art_221"><num>Art. 220</num>'
+        '<paragraph eId="art_221/para2"><content><p>Text 220.</p></content></paragraph></article>'
+    )
+    chunks = parse_act(xml_path, entry_for())
+    keys = [(c.jurisdiction, c.number, c.lang, c.eid, c.part or 0) for c in chunks]
+    assert len(keys) == len(set(keys))
+    _check_no_duplicate_keys(chunks)  # must not raise
 
 
 _ELI = "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/fr"
@@ -173,17 +194,17 @@ _ELI = "https://www.fedlex.admin.ch/eli/cc/27/317_321_377/fr"
 
 def _entry() -> ManifestEntry:
     return ManifestEntry(
-        sr="220", lang="fr", eli=_ELI, act_name="Code des obligations",
-        abbrev="CO", version_date=date(2026, 1, 1),
-        file_url="https://fedlex.data.admin.ch/example.xml",
+        jurisdiction="CH", collection="SR", number="220", lang="fr", source_url=_ELI,
+        act_name="Code des obligations", abbrev="CO", version_date=date(2026, 1, 1),
+        file_url="https://fedlex.data.admin.ch/example.xml", source="fedlex",
     )
 
 
 def _chunk(article: str, eid: str) -> Chunk:
     return Chunk(
-        sr="220", lang="fr", article=article, eid=eid, part=None,
-        heading=None, context=None, text=f"Art. {article}\nbody",
-        eli=f"{_ELI}#{eid}", act_name="Code des obligations", abbrev="CO",
+        jurisdiction="CH", collection="SR", number="220", lang="fr", article=article,
+        eid=eid, part=None, heading=None, context=None, text=f"Art. {article}\nbody",
+        source_url=f"{_ELI}#{eid}", act_name="Code des obligations", abbrev="CO",
         version_date=date(2026, 1, 1),
     )
 
@@ -198,10 +219,16 @@ def test_disambiguation_never_steals_another_articles_anchor() -> None:
 
     by_article = {c.article: c for c in resolved}
     # Art. 220 may NOT take "#art_220" — that element belongs to Art. 219. Act-level fallback.
-    assert by_article["220"].eli == _ELI
+    assert by_article["220"].source_url == _ELI
     # Art. 219 was never in a colliding group: keeps its (correct) source anchor.
-    assert by_article["219"].eli == f"{_ELI}#art_220"
-    assert by_article["221"].eli == f"{_ELI}#art_221"
+    assert by_article["219"].source_url == f"{_ELI}#art_220"
+    assert by_article["221"].source_url == f"{_ELI}#art_221"
+    # eid stays a stable DB key independent of source_url: Art. 221 owns "art_221"
+    # (article matches the eId-derived number), Art. 220 — the duplicate loser — gets
+    # a distinct suffixed eid so (eid, part) never collides.
+    assert by_article["221"].eid == "art_221"
+    assert by_article["220"].eid == "art_221__2"
+    assert by_article["219"].eid == "art_220"
 
 
 def test_disambiguation_allows_absent_anchor() -> None:
@@ -213,8 +240,11 @@ def test_disambiguation_allows_absent_anchor() -> None:
     resolved = _disambiguate_duplicate_keys(chunks, _entry(), eid_articles)
 
     by_article = {c.article: c for c in resolved}
-    assert by_article["219"].eli == f"{_ELI}#art_219"
-    assert by_article["219a"].eli == f"{_ELI}#art_219_a"
+    assert by_article["219"].source_url == f"{_ELI}#art_219"
+    assert by_article["219a"].source_url == f"{_ELI}#art_219_a"
+    # Art. 219 owns the shared eid; Art. 219a — the loser — gets a distinct suffix.
+    assert by_article["219"].eid == "art_219"
+    assert by_article["219a"].eid == "art_219__2"
 
 
 def test_disambiguation_never_synthesizes_top_level_anchor_for_annex_article() -> None:
@@ -225,8 +255,10 @@ def test_disambiguation_never_synthesizes_top_level_anchor_for_annex_article() -
     resolved = _disambiguate_duplicate_keys(chunks, _entry(), eid_articles)
 
     by_article = {c.article: c for c in resolved}
-    assert by_article["2"].eli == f"{_ELI}#anx_1/art_2"  # article 2 matches eid number: keeps
-    assert by_article["3"].eli == _ELI                    # mismatched nested: act-level, never "#art_3"
+    assert by_article["2"].source_url == f"{_ELI}#anx_1/art_2"  # article 2 matches eid number: keeps
+    assert by_article["3"].source_url == _ELI                    # mismatched nested: act-level, never "#art_3"
+    assert by_article["2"].eid == "anx_1/art_2"
+    assert by_article["3"].eid == "anx_1/art_2__2"
 
 
 def test_parse_act_splits_oversized_articles(tmp_path: Path) -> None:
@@ -320,5 +352,5 @@ def test_parse_act_repealed_element_still_owns_its_eid(tmp_path: Path) -> None:
     chunks = parse_act(xml_path, entry_for())
     by_article = {c.article: c for c in chunks}
     assert set(by_article) == {"2", "3"}
-    assert by_article["2"].eli.endswith("#art_2")
-    assert by_article["3"].eli == entry_for().eli
+    assert by_article["2"].source_url.endswith("#art_2")
+    assert by_article["3"].source_url == entry_for().source_url

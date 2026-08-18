@@ -38,7 +38,7 @@ from retrieval.language import (
 from retrieval.models import ArticleResponse, ChatRequest, SearchRequest, SearchResponse
 from retrieval.readiness import check_corpus, check_ollama, check_postgres
 from retrieval.rerank import Reranker
-from retrieval.search import SearchDeps, run_search
+from retrieval.search import SearchCache, SearchDeps, run_search
 from retrieval.security import RateLimiter, verify_api_key
 
 # Auth (when API_KEY is set) applies to every endpoint except these liveness/readiness
@@ -91,7 +91,12 @@ def _connect_deps(app: FastAPI) -> None:
     if app.state.client is None:
         app.state.client = httpx.Client(timeout=60.0)
     client = app.state.client
-    reranker = Reranker(settings.reranker_model, settings.reranker_revision)
+    # Reranker survives DB reconnects: a fresh instance here would re-load the
+    # cross-encoder weights (minutes on CPU) on the first search after any
+    # transient Postgres failure.
+    if app.state.reranker is None:
+        app.state.reranker = Reranker(settings.reranker_model, settings.reranker_revision)
+    reranker = app.state.reranker
     app.state.conn = conn
     app.state.deps = SearchDeps(
         embed=lambda text: embed_query(
@@ -143,8 +148,23 @@ def create_app() -> FastAPI:
     app.state.article_deps = None
     app.state.conn = None
     app.state.client = None
+    app.state.reranker = None
     app.state.ingest = IngestState()
     app.state.rate_limiter = None  # lazily built from settings on first request
+    app.state.search_cache = SearchCache()
+
+    def cached_search(q: str, k: int, lang: str | None, canton: str | None) -> SearchResponse:
+        # Bypass the cache while an ingest run is mutating the corpus — a
+        # result cached mid-ingest would outlive the run half-complete.
+        if app.state.ingest.running:
+            return run_search(app.state.deps, q, k, lang, canton)
+        key = (q, k, lang, canton)
+        cached = app.state.search_cache.get(key)
+        if cached is not None:
+            return cached
+        response = run_search(app.state.deps, q, k, lang, canton)
+        app.state.search_cache.put(key, response)
+        return response
 
     @app.middleware("http")
     async def enforce_security(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -212,9 +232,7 @@ def create_app() -> FastAPI:
         try:
             if app.state.deps is None:  # dropped after a DB failure — reconnect now
                 _connect_deps(app)
-            return run_search(
-                app.state.deps, request.q, request.k, request.lang, request.canton
-            )
+            return cached_search(request.q, request.k, request.lang, request.canton)
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except psycopg.Error as error:
@@ -293,8 +311,8 @@ def create_app() -> FastAPI:
         try:
             if app.state.deps is None:
                 _connect_deps(app)
-            search_response = run_search(
-                app.state.deps, request.question, request.k, fts_lang, request.canton
+            search_response = cached_search(
+                request.question, request.k, fts_lang, request.canton
             )
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
@@ -328,6 +346,7 @@ def create_app() -> FastAPI:
                         "citations": [],
                         "model": settings.chat_model,
                         "duration_ms": int((time.perf_counter() - t0) * 1000),
+                        "refusal": True,
                     },
                 )
                 return
@@ -348,13 +367,19 @@ def create_app() -> FastAPI:
             except Exception as error:
                 yield _sse("error", {"detail": str(error)})
                 return
-            citations = extract_citations("".join(parts), sources, answer_lang)
+            answer = "".join(parts)
+            citations = extract_citations(answer, sources, answer_lang)
             yield _sse(
                 "done",
                 {
                     "citations": [c.model_dump() for c in citations],
                     "model": settings.chat_model,
                     "duration_ms": int((time.perf_counter() - t0) * 1000),
+                    # Explicit refusal signal: the canonical sentence, not
+                    # merely "no citations" — an answer with malformed
+                    # citations must NOT be mistaken for a refusal (the
+                    # desktop hides sources on refusals).
+                    "refusal": _REFUSAL_TEXT.casefold() in answer.casefold(),
                 },
             )
 
@@ -392,6 +417,8 @@ def create_app() -> FastAPI:
         python = ingestion_python(app.state.settings.ingestion_python)
         if not start_ingest(app.state.ingest, python):
             raise HTTPException(status_code=409, detail="an ingest run is already active")
+        # The corpus is about to change — cached results no longer reflect it.
+        app.state.search_cache.clear()
         return {"status": "started"}
 
     @app.post("/ingest/stop")

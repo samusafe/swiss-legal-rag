@@ -84,7 +84,19 @@ describe("postChat", () => {
         ],
         model: "qwen3:4b",
         durationMs: 12,
+        // Absent on the wire (older backend) maps to false — never "refusal".
+        refusal: false,
       },
+    ]);
+  });
+
+  it("maps an explicit refusal flag on the done event", async () => {
+    const body =
+      'event: done\ndata: {"citations": [], "model": "m", "duration_ms": 3, "refusal": true}\n\n';
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(body)));
+
+    expect(await collect()).toEqual([
+      { type: "done", citations: [], model: "m", durationMs: 3, refusal: true },
     ]);
   });
 
@@ -95,7 +107,7 @@ describe("postChat", () => {
     await collect("Kündigungsfrist?");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/chat",
+      "http://127.0.0.1:8000/chat",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ question: "Kündigungsfrist?", canton: null }),
@@ -111,7 +123,7 @@ describe("postChat", () => {
     await collect("Kündigungsfrist?");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/chat",
+      "http://127.0.0.1:8000/chat",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ question: "Kündigungsfrist?", canton: "SG" }),
@@ -197,7 +209,7 @@ describe("search", () => {
     const results = await search("Kündigungsfrist", 8, "de");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/search",
+      "http://127.0.0.1:8000/search",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ q: "Kündigungsfrist", k: 8, lang: "de", canton: null }),
@@ -230,7 +242,7 @@ describe("search", () => {
     await search("q", 8, "de");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/search",
+      "http://127.0.0.1:8000/search",
       expect.objectContaining({
         body: JSON.stringify({ q: "q", k: 8, lang: "de", canton: "SG" }),
       }),
@@ -312,7 +324,7 @@ describe("fetchArticle", () => {
     const article = await fetchArticle("CH", "220", "335c", "de");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/article?jurisdiction=CH&number=220&article=335c&lang=de",
+      "http://127.0.0.1:8000/article?jurisdiction=CH&number=220&article=335c&lang=de",
       expect.objectContaining({ headers: expect.anything() }),
     );
     expect(article).toEqual({
@@ -410,7 +422,7 @@ describe("postIngest", () => {
     vi.stubGlobal("fetch", fetchMock);
     await postIngest();
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/ingest",
+      "http://127.0.0.1:8000/ingest",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -434,7 +446,7 @@ describe("postIngestStop", () => {
     vi.stubGlobal("fetch", fetchMock);
     await postIngestStop();
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/ingest/stop",
+      "http://127.0.0.1:8000/ingest/stop",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -481,7 +493,7 @@ describe("X-API-Key header (VITE_API_KEY)", () => {
     }
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/chat",
+      "http://127.0.0.1:8000/chat",
       expect.objectContaining({
         headers: expect.objectContaining({ "X-API-Key": "secret-key" }),
       }),

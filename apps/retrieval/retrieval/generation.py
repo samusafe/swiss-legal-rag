@@ -46,10 +46,16 @@ def build_messages(
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
 
-# connect: time to establish the TCP/TLS handshake. read: max gap between
-# successive chunks once streaming — CPU generation can take minutes overall,
-# but a hung model must not hold the connection open forever between tokens.
-_STREAM_TIMEOUT = httpx.Timeout(10.0, read=120.0)
+# connect: time to establish the TCP/TLS handshake. read: max silent gap on
+# the stream. The FIRST gap covers model load plus full prompt evaluation on
+# CPU — measured at 220s+ for a chat-sized prompt on a memory-pressured
+# 4-core laptop — so it must be generous; once tokens flow, gaps are short.
+_STREAM_TIMEOUT = httpx.Timeout(10.0, read=600.0)
+
+# Keep the model resident between requests (Ollama's default is 5m): paying
+# the ~2GB weight reload on every question adds tens of seconds to the first
+# token on CPU-only machines.
+_KEEP_ALIVE = "30m"
 
 
 def stream_chat(
@@ -82,6 +88,7 @@ def stream_chat(
                 "messages": messages,
                 "stream": True,
                 "think": False,
+                "keep_alive": _KEEP_ALIVE,
                 "options": {"num_ctx": 8192},
             },
             timeout=_STREAM_TIMEOUT,
@@ -170,6 +177,14 @@ def stream_chat(
                 else:
                     # Marker never appeared — the stream was the answer itself.
                     yield ("token", buffer)
+    except httpx.TimeoutException as error:
+        # Not "unreachable": Ollama answered but produced no bytes within the
+        # read timeout — on CPU that means prompt evaluation is still grinding
+        # (or the machine is out of memory and paging).
+        raise RuntimeError(
+            f"Ollama timed out generating with `{model}` — CPU prompt evaluation "
+            f"can take minutes; close memory-hungry apps and retry"
+        ) from error
     except httpx.HTTPError as error:
         raise RuntimeError(
             f"Ollama unreachable at {base_url} — is `ollama serve` running and "

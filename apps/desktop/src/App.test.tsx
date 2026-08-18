@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import App from "./App";
-import type { SearchResult } from "./lib/api";
+import type { ChatEvent, SearchResult } from "./lib/api";
 
 // useIngest attaches to the progress stream unconditionally on mount (see
 // its own module doc) — every test that mounts App drives this, so the
@@ -59,7 +59,7 @@ vi.mock("./lib/db", () => ({
   isTauri: () => false,
 }));
 
-import { fetchArticle, search } from "./lib/api";
+import { fetchArticle, getHealth, postChat, search } from "./lib/api";
 import type { Article } from "./lib/api";
 import { deleteConversation, getMessages, listConversations, renameConversation } from "./lib/db";
 import type { Conversation } from "./lib/db";
@@ -70,12 +70,29 @@ const listConversationsMock = vi.mocked(listConversations);
 const deleteConversationMock = vi.mocked(deleteConversation);
 const renameConversationMock = vi.mocked(renameConversation);
 const getMessagesMock = vi.mocked(getMessages);
+const getHealthMock = vi.mocked(getHealth);
+const postChatMock = vi.mocked(postChat);
+
+async function* hangingChat(): AsyncGenerator<ChatEvent> {
+  // Simulates the slow pre-first-token "Searching articles…" phase (rerank
+  // can take minutes): the stream never emits a single event.
+  await new Promise<never>(() => {
+    /* never resolves for the lifetime of the test */
+  });
+}
 
 const CONVERSATION: Conversation = {
   id: "conv-1",
   title: "Kündigungsfrist?",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:01.000Z",
+};
+
+const CONVERSATION_2: Conversation = {
+  id: "conv-2",
+  title: "Second chat",
+  createdAt: "2026-01-02T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:01.000Z",
 };
 
 const RESULT: SearchResult = {
@@ -246,6 +263,73 @@ it("surfaces a rejected conversation delete as a visible error banner", async ()
   expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
 });
 
+it("deleting the OPEN conversation resets the view to the blank new-chat state", async () => {
+  listConversationsMock.mockResolvedValueOnce([CONVERSATION]);
+  getMessagesMock.mockResolvedValueOnce([
+    {
+      id: "m1",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "Ein Monat.",
+      sourcesJson: null,
+      createdAt: "2026-01-01T00:00:01.000Z",
+    },
+  ]);
+  const user = userEvent.setup();
+  render(
+    <HeroUIProvider>
+      <App />
+    </HeroUIProvider>,
+  );
+
+  await user.click(await screen.findByText("Kündigungsfrist?"));
+  expect(await screen.findByText("Ein Monat.")).toBeInTheDocument();
+
+  const row = (await screen.findByText("Kündigungsfrist?")).closest("li");
+  if (row === null) throw new Error("row not found");
+  await user.click(within(row).getByRole("button", { name: "Delete" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+  expect(deleteConversationMock).toHaveBeenCalledWith("conv-1");
+  // The deleted conversation's messages must not linger on screen — the
+  // view resets to the blank new-chat slate.
+  await waitFor(() => expect(screen.queryByText("Ein Monat.")).not.toBeInTheDocument());
+});
+
+it("deleting a NON-open conversation leaves the currently viewed conversation untouched", async () => {
+  listConversationsMock.mockResolvedValueOnce([CONVERSATION, CONVERSATION_2]);
+  getMessagesMock.mockResolvedValueOnce([
+    {
+      id: "m1",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "Ein Monat.",
+      sourcesJson: null,
+      createdAt: "2026-01-01T00:00:01.000Z",
+    },
+  ]);
+  const user = userEvent.setup();
+  render(
+    <HeroUIProvider>
+      <App />
+    </HeroUIProvider>,
+  );
+
+  await user.click(await screen.findByText("Kündigungsfrist?"));
+  expect(await screen.findByText("Ein Monat.")).toBeInTheDocument();
+
+  const row2 = (await screen.findByText("Second chat")).closest("li");
+  if (row2 === null) throw new Error("row not found");
+  await user.click(within(row2).getByRole("button", { name: "Delete" }));
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+  await waitFor(() => expect(deleteConversationMock).toHaveBeenCalledWith("conv-2"));
+  // The open conversation (conv-1) was untouched by deleting a different row.
+  expect(screen.getByText("Ein Monat.")).toBeInTheDocument();
+});
+
 it("surfaces a rejected conversation rename as a visible error banner", async () => {
   listConversationsMock.mockResolvedValueOnce([CONVERSATION]);
   renameConversationMock.mockRejectedValueOnce(new Error("disk full"));
@@ -357,4 +441,51 @@ it("surfaces a rejected mount-time conversation-list refresh as a visible error 
   );
 
   expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+});
+
+it("keeps the sidebar dot and disabled composer for a background turn stuck in the pre-first-token phase, across a '+' new-chat navigation", async () => {
+  getHealthMock.mockResolvedValue(true);
+  listConversationsMock.mockResolvedValueOnce([CONVERSATION]);
+  // The conversation was reopened after a restart and already has an
+  // interrupted (empty) prior turn — matches the reported repro.
+  getMessagesMock.mockResolvedValueOnce([
+    {
+      id: "m0",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "",
+      sourcesJson: null,
+      createdAt: "2026-01-01T00:00:01.000Z",
+    },
+  ]);
+  postChatMock.mockImplementation(hangingChat);
+  const user = userEvent.setup();
+  render(
+    <HeroUIProvider>
+      <App />
+    </HeroUIProvider>,
+  );
+
+  await user.click(await screen.findByText("Kündigungsfrist?"));
+  expect(await screen.findByText("Answer interrupted — send your question again.")).toBeInTheDocument();
+
+  const textbox = await screen.findByPlaceholderText("Ask a question about Swiss federal law…");
+  await user.type(textbox, "Second question");
+  await user.click(screen.getByRole("button", { name: "Send" }));
+
+  // Confirms the turn is genuinely in the pre-first-token phase before
+  // navigating away — mirrors "shows 'Searching articles…' + Stop when
+  // viewed" in the report.
+  await screen.findByText("Searching articles…");
+  expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "New conversation" }));
+
+  const row = (await screen.findByText("Kündigungsfrist?")).closest("li");
+  if (row === null) throw new Error("row not found");
+  // EXPECTED (per the spec): the row shows the generating dot and the
+  // composer is disabled while a background turn for a different
+  // conversation is in flight — even though nothing has streamed yet.
+  expect(within(row).getByRole("status", { name: "Generating…" })).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("Ask a question about Swiss federal law…")).toBeDisabled();
 });

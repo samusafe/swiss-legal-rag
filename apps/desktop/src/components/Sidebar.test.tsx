@@ -16,6 +16,8 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     onToggle: vi.fn(),
     conversations: CONVERSATIONS,
     activeId: null,
+    generatingId: null,
+    unreadOutcomes: {},
     onNew: vi.fn(),
     onResume: vi.fn(),
     onRename: vi.fn(),
@@ -76,6 +78,91 @@ describe("Sidebar (expanded)", () => {
 
     expect(active).toHaveClass("border-l-3", "border-primary");
     expect(inactive).toHaveClass("border-l-3", "border-transparent");
+  });
+
+  it("shows a pulsing status dot only on the conversation currently generating", () => {
+    renderSidebar({ generatingId: "c2" });
+
+    const generatingRow = screen.getByText("Untitled conversation").closest("li");
+    const otherRow = screen.getByText("First chat").closest("li");
+    if (generatingRow === null || otherRow === null) throw new Error("row not found");
+
+    expect(within(generatingRow).getByRole("status", { name: "Generating…" })).toBeInTheDocument();
+    expect(within(otherRow).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows the generating dot when generation starts AFTER the initial render", () => {
+    // Runtime regression: the sidebar is already mounted when a send() flips
+    // generatingId from null to an id — the dot must appear on that
+    // re-render, not only when the prop is set at mount (the cases above).
+    const props = {
+      collapsed: false,
+      onToggle: vi.fn(),
+      conversations: CONVERSATIONS,
+      activeId: null,
+      generatingId: null as string | null,
+      unreadOutcomes: {},
+      onNew: vi.fn(),
+      onResume: vi.fn(),
+      onRename: vi.fn(),
+      onDelete: vi.fn(),
+    };
+    const view = render(
+      <HeroUIProvider>
+        <Sidebar {...props} />
+      </HeroUIProvider>,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    view.rerender(
+      <HeroUIProvider>
+        <Sidebar {...props} generatingId="c1" />
+      </HeroUIProvider>,
+    );
+
+    const row = screen.getByText("First chat").closest("li");
+    if (row === null) throw new Error("row not found");
+    expect(within(row).getByRole("status", { name: "Generating…" })).toBeInTheDocument();
+  });
+
+  it("shows a warning-colored pulsing dot on the generating conversation", () => {
+    renderSidebar({ generatingId: "c1" });
+
+    const dot = screen.getByRole("status", { name: "Generating…" });
+
+    expect(dot).toHaveClass("bg-warning", "animate-pulse");
+  });
+
+  it("shows a static success dot for a conversation whose answer completed while the user was elsewhere", () => {
+    renderSidebar({ unreadOutcomes: { c1: "done" } });
+
+    const row = screen.getByText("First chat").closest("li");
+    if (row === null) throw new Error("row not found");
+    const dot = within(row).getByRole("status", { name: "Answer ready" });
+
+    expect(dot).toHaveClass("bg-success");
+    expect(dot).not.toHaveClass("animate-pulse");
+  });
+
+  it("shows a static danger dot for a conversation whose answer errored while the user was elsewhere", () => {
+    renderSidebar({ unreadOutcomes: { c1: "error" } });
+
+    const row = screen.getByText("First chat").closest("li");
+    if (row === null) throw new Error("row not found");
+    const dot = within(row).getByRole("status", { name: "Answer failed" });
+
+    expect(dot).toHaveClass("bg-danger");
+    expect(dot).not.toHaveClass("animate-pulse");
+  });
+
+  it("the generating dot wins over an unread outcome for the same conversation", () => {
+    renderSidebar({ generatingId: "c1", unreadOutcomes: { c1: "done" } });
+
+    const row = screen.getByText("First chat").closest("li");
+    if (row === null) throw new Error("row not found");
+
+    expect(within(row).getByRole("status", { name: "Generating…" })).toBeInTheDocument();
+    expect(within(row).queryByRole("status", { name: "Answer ready" })).not.toBeInTheDocument();
   });
 
   it("resumes a conversation when its row is pressed", async () => {

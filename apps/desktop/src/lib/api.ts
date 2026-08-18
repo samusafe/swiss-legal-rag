@@ -78,11 +78,13 @@ export type ChatEvent =
   | { type: "sources"; sources: Source[] }
   | { type: "thinking"; delta: string }
   | { type: "token"; delta: string }
-  | { type: "done"; citations: Citation[]; model: string; durationMs: number }
+  | { type: "done"; citations: Citation[]; model: string; durationMs: number; refusal: boolean }
   | { type: "error"; detail: string };
 
 export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  // 127.0.0.1, not localhost: uvicorn binds IPv4-only and localhost can
+  // resolve to ::1 in the webview, which reads as "offline" while the API is up.
+  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 // Debug feature, off by default: raw model reasoning is unpredictable and not
 // meant for end users. Set VITE_SHOW_THINKING=true at build time to enable the
@@ -185,12 +187,16 @@ function toChatEvent(frame: SseFrame): ChatEvent {
         citations: WireCitation[];
         model: string;
         duration_ms: number;
+        refusal?: boolean;
       };
       return {
         type: "done",
         citations: done.citations.map(fromWireCitation),
         model: done.model,
         durationMs: done.duration_ms,
+        // Tolerate an older backend that predates the field: absent means
+        // "not a refusal", never "hide the sources".
+        refusal: done.refusal ?? false,
       };
     }
     case "error":

@@ -87,7 +87,7 @@ describe("useChat", () => {
         { type: "sources", sources: [SOURCE] },
         { type: "token", delta: "Die Frist " },
         { type: "token", delta: "beträgt einen Monat [SR 220 Art. 335c]." },
-        { type: "done", citations: [CITATION], model: "m", durationMs: 1 },
+        { type: "done", citations: [CITATION], model: "m", durationMs: 1, refusal: false },
       ]),
     );
     const { result } = renderHook(() => useChat());
@@ -111,12 +111,34 @@ describe("useChat", () => {
     expect(result.current.banner).toBeNull();
   });
 
+  test("done with zero citations but no refusal keeps the sources visible", async () => {
+    // Regression: a small model that writes citations in a malformed format
+    // ("Artikel 7 BSG 661.11" instead of "[BSG 661.11 Art. 7]") yields zero
+    // extracted citations — that is NOT a refusal, and hiding the articles
+    // the answer was grounded in makes the defect impossible to inspect.
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE] },
+        { type: "token", delta: "Laut Artikel 7 BSG 661.11 gilt..." },
+        { type: "done", citations: [], model: "m", durationMs: 1, refusal: false },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("q");
+    });
+
+    expect(result.current.sources).toEqual([SOURCE]);
+    expect(result.current.messages.at(-1)?.sources).toEqual([SOURCE]);
+  });
+
   test("done with zero citations clears sources", async () => {
     postChatMock.mockReturnValue(
       events([
         { type: "sources", sources: [SOURCE, { ...SOURCE, article: "1" }] },
         { type: "token", delta: "No applicable provision found." },
-        { type: "done", citations: [], model: "m", durationMs: 1 },
+        { type: "done", citations: [], model: "m", durationMs: 1, refusal: true },
       ]),
     );
     const { result } = renderHook(() => useChat());
@@ -169,6 +191,30 @@ describe("useChat", () => {
     });
     expect(result.current.banner).toBeNull();
     expect(result.current.streaming).toBe(false);
+  });
+
+  it("persists no assistant row when an in-band error arrives before any token", async () => {
+    // Sources came, generation failed, nothing streamed: an empty assistant
+    // row would reload later as a bogus "interrupted" note (the error the
+    // user actually saw is not persisted).
+    postChatMock.mockReturnValue(
+      events([
+        { type: "sources", sources: [SOURCE] },
+        { type: "error", detail: "Ollama timed out" },
+      ]),
+    );
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("q");
+    });
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "",
+      error: "Ollama timed out",
+    });
+    expect(appendMessageMock).toHaveBeenCalledTimes(1); // the user message only
   });
 
   it("sets the banner and drops the empty bubble when the request fails", async () => {
@@ -504,7 +550,7 @@ describe("useChat", () => {
         { type: "sources", sources: [SOURCE] },
         { type: "token", delta: "Die Frist " },
         { type: "token", delta: "beträgt einen Monat [SR 220 Art. 335c]." },
-        { type: "done", citations: [CITATION], model: "m", durationMs: 1 },
+        { type: "done", citations: [CITATION], model: "m", durationMs: 1, refusal: false },
       ]),
     );
     const { result } = renderHook(() => useChat());
@@ -529,7 +575,7 @@ describe("useChat", () => {
       events([
         { type: "sources", sources: [SOURCE, { ...SOURCE, article: "1" }] },
         { type: "token", delta: "No applicable provision found." },
-        { type: "done", citations: [], model: "m", durationMs: 1 },
+        { type: "done", citations: [], model: "m", durationMs: 1, refusal: true },
       ]),
     );
     const { result } = renderHook(() => useChat());
@@ -598,6 +644,32 @@ describe("useChat persistence", () => {
     expect(result.current.conversationId).toBe("conv-1");
   });
 
+  it("calls onConversationCreated with the new row's id as soon as it's persisted, before the stream finishes", async () => {
+    let releaseToken: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<void>((resolve) => {
+        releaseToken = resolve;
+      });
+    });
+    const onConversationCreated = vi.fn();
+    const { result } = renderHook(() => useChat(onConversationCreated));
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("Kündigungsfrist?");
+    });
+
+    await waitFor(() => expect(onConversationCreated).toHaveBeenCalledExactlyOnceWith("conv-1"));
+    // The stream is still hanging — the sidebar must not have to wait for it.
+    expect(result.current.streaming).toBe(true);
+
+    act(() => releaseToken?.());
+    await act(async () => {
+      await pending;
+    });
+  });
+
   it("truncates a long first question to 60 chars for the conversation title", async () => {
     postChatMock.mockReturnValue(events([]));
     const { result } = renderHook(() => useChat());
@@ -616,7 +688,7 @@ describe("useChat persistence", () => {
         { type: "sources", sources: [SOURCE] },
         { type: "token", delta: "Ein " },
         { type: "token", delta: "Monat" },
-        { type: "done", citations: [CITATION], model: "m", durationMs: 1 },
+        { type: "done", citations: [CITATION], model: "m", durationMs: 1, refusal: false },
       ]),
     );
     const { result } = renderHook(() => useChat());
@@ -753,6 +825,67 @@ describe("useChat persistence", () => {
     ]);
   });
 
+  // Bug regression: an app kill mid-generation leaves the user question
+  // persisted but no completed assistant reply — if a *blank* assistant row
+  // exists (whitespace-only content), reopening the conversation must mark
+  // it `stopped` so MessageList renders the interrupted-turn note instead of
+  // a bare empty bubble. A normal, non-empty answer is untouched.
+  it("loadConversation() marks an empty/whitespace-only assistant row as stopped (interrupted turn)", async () => {
+    getMessagesMock.mockResolvedValue([
+      {
+        id: "m1",
+        conversationId: "conv-9",
+        role: "user",
+        content: "Kündigungsfrist?",
+        sourcesJson: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "m2",
+        conversationId: "conv-9",
+        role: "assistant",
+        content: "   ",
+        sourcesJson: null,
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+    ]);
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "   ",
+      stopped: true,
+    });
+  });
+
+  it("loadConversation() leaves a normal (non-empty) assistant answer unmarked", async () => {
+    getMessagesMock.mockResolvedValue([
+      {
+        id: "m1",
+        conversationId: "conv-9",
+        role: "assistant",
+        content: "Ein Monat.",
+        sourcesJson: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "Ein Monat.",
+    });
+    expect(result.current.messages.at(-1)?.stopped).toBeUndefined();
+  });
+
   it("loadConversation() sets the banner and leaves state untouched when the read fails", async () => {
     getMessagesMock.mockRejectedValue(new Error("disk full"));
     const { result } = renderHook(() => useChat());
@@ -784,28 +917,22 @@ describe("useChat persistence", () => {
     );
   });
 
-  it("does not let a stale in-flight stream corrupt a conversation loaded mid-stream", async () => {
+  // --- Background generation -------------------------------------------
+  // Switching conversations mid-stream must no longer abort the in-flight
+  // generation: it keeps running for its own conversation, the sidebar can
+  // be told which conversation that is, and navigating back re-attaches to
+  // its live, still-growing transcript instead of losing it.
+
+  it("(a) switching to another conversation does not abort the in-flight generation — it keeps running and persists normally", async () => {
     let releaseSecondToken: (() => void) | undefined;
     postChatMock.mockImplementation(async function* (_question: string, _signal: AbortSignal) {
       yield { type: "token", delta: "Partial " } as const;
-      // Simulates an event already in flight (e.g. buffered by the network
-      // stack) when the user navigates away — it arrives after abort() has
-      // been called but before the fetch actually tears down.
       await new Promise<void>((resolve) => {
         releaseSecondToken = resolve;
       });
-      yield { type: "token", delta: "should never reach state" } as const;
+      yield { type: "token", delta: "done." } as const;
     });
-    getMessagesMock.mockResolvedValue([
-      {
-        id: "m1",
-        conversationId: "conv-9",
-        role: "assistant",
-        content: "Loaded answer",
-        sourcesJson: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-    ]);
+    getMessagesMock.mockResolvedValue([]); // the conversation switched to
     const { result } = renderHook(() => useChat());
 
     let pending: Promise<void> = Promise.resolve();
@@ -817,26 +944,371 @@ describe("useChat persistence", () => {
     await act(async () => {
       await result.current.loadConversation("conv-9");
     });
-    const loaded = [
-      // No brackets in the text → no citations → sources cleared (see the
-      // zero-citations rule in loadConversation's rebuild).
-      { role: "assistant", text: "Loaded answer", citations: [], error: null, sources: [] },
-    ];
-    expect(result.current.messages).toEqual(loaded);
+    // Viewing a different, empty conversation — nothing streamed there, and
+    // switching away did not abort anything.
     expect(result.current.conversationId).toBe("conv-9");
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.streaming).toBe(false);
 
-    // Flush the stale send()'s remaining event and let it finish.
     act(() => releaseSecondToken?.());
     await act(async () => {
       await pending;
     });
 
-    expect(result.current.messages).toEqual(loaded); // untouched: no stray token, no "stopped"
+    // The background turn ran to completion (not "stopped") and persisted.
+    expect(logAuditMock).toHaveBeenCalledWith(
+      "chat.answer",
+      expect.objectContaining({ outcome: "done" }),
+      expect.any(Number),
+    );
+    expect(appendMessageMock).toHaveBeenCalledWith({
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "Partial done.",
+      sourcesJson: "[]",
+    });
+  });
+
+  it("(b) re-attaches to the live partial when navigating back to the generating conversation, without hitting the DB", async () => {
+    let releaseToken: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<void>((resolve) => {
+        releaseToken = resolve;
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.messages.at(-1)?.text).toBe("Partial "));
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+    expect(result.current.messages).toEqual([]);
+    getMessagesMock.mockClear();
+
+    await act(async () => {
+      await result.current.loadConversation("conv-1");
+    });
+
+    expect(result.current.conversationId).toBe("conv-1");
+    expect(result.current.streaming).toBe(true);
+    expect(result.current.messages.at(-1)?.text).toBe("Partial ");
+    expect(getMessagesMock).not.toHaveBeenCalled(); // re-attach uses the live turn, not a DB fetch
+
+    act(() => releaseToken?.());
+    await act(async () => {
+      await pending;
+    });
+  });
+
+  it("(c) exposes generatingId for the streaming conversation, independent of what's visible, clearing once it finishes", async () => {
+    let releaseToken: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<void>((resolve) => {
+        releaseToken = resolve;
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.generatingId).toBe("conv-1"));
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+    expect(result.current.generatingId).toBe("conv-1"); // unaffected by navigation
     expect(result.current.conversationId).toBe("conv-9");
-    // The stale turn's assistant reply must not be persisted either.
+
+    act(() => releaseToken?.());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.generatingId).toBeNull();
+  });
+
+  it("(d) stop() still works and persists the partial as stopped after navigating back to the generating conversation", async () => {
+    postChatMock.mockImplementation(async function* (_question: string, signal: AbortSignal) {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.messages.at(-1)?.text).toBe("Partial "));
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+    await act(async () => {
+      await result.current.loadConversation("conv-1");
+    });
+    expect(result.current.streaming).toBe(true);
+
+    act(() => {
+      result.current.stop();
+    });
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "Partial ",
+      stopped: true,
+    });
+    expect(appendMessageMock).toHaveBeenCalledWith({
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "Partial ",
+      sourcesJson: "[]",
+    });
+  });
+
+  it("(e) notifyDeleted() on the generating conversation aborts its stream and blocks the partial answer from persisting into the deleted row", async () => {
+    postChatMock.mockImplementation(async function* (_question: string, signal: AbortSignal) {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.generatingId).toBe("conv-1"));
+
+    act(() => result.current.notifyDeleted("conv-1"));
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.generatingId).toBeNull();
+    // The open+generating conversation was deleted: the view resets too.
+    expect(result.current.conversationId).toBeNull();
+    expect(result.current.messages).toEqual([]);
+    // Only the user message was persisted before the delete — the partial
+    // answer must not be written into the now-deleted conversation row.
+    expect(appendMessageMock).toHaveBeenCalledTimes(1);
     expect(appendMessageMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ role: "assistant" }),
     );
+  });
+
+  it("(f) exposes generatingId for an existing conversation from the moment send() starts, before the stream has emitted anything (the pre-first-token 'Searching articles' phase) — survives reset() to a blank chat, and re-entering still shows the in-progress turn", async () => {
+    // Simulates a slow retrieval/rerank phase: the stream hangs with zero
+    // events (not even `sources`) until released.
+    let releaseStream: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => {
+        releaseStream = resolve;
+      });
+    });
+    // "test" is an existing conversation, already open (not created by this
+    // send()) — mirrors the real repro: the owner reopened it after an app
+    // restart, then sent a new message into it.
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.loadConversation("conv-1");
+    });
+    expect(result.current.conversationId).toBe("conv-1");
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+
+    // A turn is "generating" from the instant send() starts, not from the
+    // first token — createConversation() is never called (existing
+    // conversation), so this must be true synchronously, with no stream
+    // event and no waitFor needed.
+    expect(result.current.generatingId).toBe("conv-1");
+    expect(createConversationMock).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.reset();
+    });
+    expect(result.current.conversationId).toBeNull();
+    // The contract under test: reset() only navigates the *view* — it must
+    // never clear a still-running background generation.
+    expect(result.current.generatingId).toBe("conv-1");
+
+    await act(async () => {
+      await result.current.loadConversation("conv-1");
+    });
+    expect(result.current.streaming).toBe(true);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "",
+    });
+
+    act(() => releaseStream?.());
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.generatingId).toBeNull();
+  });
+});
+
+describe("useChat unread outcomes (sidebar notification dots)", () => {
+  beforeEach(() => {
+    postChatMock.mockReset();
+    createConversationMock.mockReset();
+    appendMessageMock.mockReset();
+    getMessagesMock.mockReset();
+    logAuditMock.mockReset();
+    createConversationMock.mockResolvedValue(CONVERSATION);
+    appendMessageMock.mockResolvedValue("msg-1");
+  });
+
+  it("(a) records a 'done' entry when the turn completes while the user is viewing a different conversation", async () => {
+    let releaseToken: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Ein Monat" } as const;
+      await new Promise<void>((resolve) => {
+        releaseToken = resolve;
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe("conv-1"));
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+    expect(result.current.conversationId).toBe("conv-9");
+
+    act(() => releaseToken?.());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.unreadOutcomes).toEqual({ "conv-1": "done" });
+  });
+
+  it("(b) records no entry when the turn completes while the user is still viewing it", async () => {
+    postChatMock.mockReturnValue(events([{ type: "token", delta: "Ein Monat" }]));
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.send("q");
+    });
+
+    expect(result.current.unreadOutcomes).toEqual({});
+  });
+
+  it("(c) records an 'error' entry when the stream throws mid-answer while the user is elsewhere", async () => {
+    let throwError: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Partial" } as const;
+      await new Promise<void>((resolve) => {
+        throwError = resolve;
+      });
+      throw new Error("connection reset");
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe("conv-1"));
+
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+
+    act(() => throwError?.());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.unreadOutcomes).toEqual({ "conv-1": "error" });
+  });
+
+  it("(d) loadConversation() clears the unread entry for the conversation being opened", async () => {
+    let releaseToken: (() => void) | undefined;
+    postChatMock.mockImplementation(async function* () {
+      yield { type: "token", delta: "Ein Monat" } as const;
+      await new Promise<void>((resolve) => {
+        releaseToken = resolve;
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe("conv-1"));
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+    act(() => releaseToken?.());
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.unreadOutcomes).toEqual({ "conv-1": "done" });
+
+    await act(async () => {
+      await result.current.loadConversation("conv-1");
+    });
+
+    expect(result.current.unreadOutcomes).toEqual({});
+  });
+
+  it("(e) a user-initiated stop() records no unread entry, even when the user has navigated elsewhere", async () => {
+    postChatMock.mockImplementation(async function* (_question: string, signal: AbortSignal) {
+      yield { type: "token", delta: "Partial " } as const;
+      await new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+    getMessagesMock.mockResolvedValue([]);
+    const { result } = renderHook(() => useChat());
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.send("q");
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe("conv-1"));
+    await act(async () => {
+      await result.current.loadConversation("conv-9");
+    });
+
+    act(() => result.current.stop());
+    await act(async () => {
+      await pending;
+    });
+
+    expect(result.current.unreadOutcomes).toEqual({});
   });
 });
 

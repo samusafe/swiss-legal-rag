@@ -379,6 +379,34 @@ const dict = {
   "activity.results": { en: "{n} results", de: "{n} Ergebnisse", fr: "{n} résultats", it: "{n} risultati", pt: "{n} resultados" },
   "activity.chunks": { en: "{n} chunks", de: "{n} Chunks", fr: "{n} segments", it: "{n} frammenti", pt: "{n} fragmentos" },
   "activity.expand": { en: "Show details", de: "Details anzeigen", fr: "Afficher les détails", it: "Mostra dettagli", pt: "Mostrar detalhes" },
+  "sidebar.generating": {
+    en: "Generating…",
+    de: "Wird generiert…",
+    fr: "Génération…",
+    it: "Generazione…",
+    pt: "A gerar…",
+  },
+  "sidebar.answerReady": {
+    en: "Answer ready",
+    de: "Antwort bereit",
+    fr: "Réponse prête",
+    it: "Risposta pronta",
+    pt: "Resposta pronta",
+  },
+  "sidebar.answerFailed": {
+    en: "Answer failed",
+    de: "Antwort fehlgeschlagen",
+    fr: "Réponse échouée",
+    it: "Risposta non riuscita",
+    pt: "Resposta falhou",
+  },
+  "chat.interrupted": {
+    en: "Answer interrupted — send your question again.",
+    de: "Antwort unterbrochen — stelle deine Frage erneut.",
+    fr: "Réponse interrompue — renvoyez votre question.",
+    it: "Risposta interrotta — invia di nuovo la domanda.",
+    pt: "Resposta interrompida — envia a pergunta de novo.",
+  },
 } satisfies Record<string, { en: string } & Partial<Record<Exclude<Lang, "en">, string>>>;
 
 export type UiKey = keyof typeof dict;

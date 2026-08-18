@@ -165,10 +165,43 @@ export interface SidebarProps {
   onToggle: () => void;
   conversations: Conversation[];
   activeId: string | null;
+  // The conversation currently generating an answer in the background, if
+  // any — independent of `activeId` (the user may be viewing a different
+  // conversation, or none, while this one keeps streaming).
+  generatingId: string | null;
+  // Conversations whose generation finished (successfully or with an error)
+  // while the user was elsewhere — cleared once opened. See useChat's
+  // UnreadOutcome doc. A row that's also `generatingId` shows the generating
+  // dot instead (see the row rendering below) — it can't have a leftover
+  // unread outcome from the run in progress.
+  unreadOutcomes: Record<string, "done" | "error">;
   onNew: () => void;
   onResume: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+}
+
+// One dot per row, in one of three states: warning/pulsing (generating),
+// static success (answer ready), or static danger (answer failed). Pulsing
+// is suppressed under reduced motion, matching the rest of the app.
+function StatusDot({
+  color,
+  pulsing,
+  label,
+}: {
+  color: "warning" | "success" | "danger";
+  pulsing: boolean;
+  label: string;
+}) {
+  const bg = { warning: "bg-warning", success: "bg-success", danger: "bg-danger" }[color];
+  return (
+    <span
+      role="status"
+      aria-label={label}
+      title={label}
+      className={`h-2 w-2 shrink-0 rounded-full ${bg} ${pulsing ? "animate-pulse" : ""}`}
+    />
+  );
 }
 
 export function Sidebar({
@@ -176,6 +209,8 @@ export function Sidebar({
   onToggle,
   conversations,
   activeId,
+  generatingId,
+  unreadOutcomes,
   onNew,
   onResume,
   onRename,
@@ -247,6 +282,15 @@ export function Sidebar({
                   conversation.id === activeId
                     ? "border-l-3 border-primary"
                     : "border-l-3 border-transparent"
+                }
+                startContent={
+                  conversation.id === generatingId ? (
+                    <StatusDot color="warning" pulsing={!reducedMotion} label={t("sidebar.generating")} />
+                  ) : unreadOutcomes[conversation.id] === "done" ? (
+                    <StatusDot color="success" pulsing={false} label={t("sidebar.answerReady")} />
+                  ) : unreadOutcomes[conversation.id] === "error" ? (
+                    <StatusDot color="danger" pulsing={false} label={t("sidebar.answerFailed")} />
+                  ) : undefined
                 }
                 endContent={
                   <div className="flex gap-0.5 opacity-0 group-hover:opacity-100">

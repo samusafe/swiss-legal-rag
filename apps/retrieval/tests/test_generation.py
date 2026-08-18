@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import httpx
@@ -115,7 +116,22 @@ def test_stream_chat_uses_finite_connect_and_read_timeouts(monkeypatch) -> None:
     timeout = captured["timeout"]
     assert timeout is not None
     assert timeout.connect == 10.0
-    assert timeout.read == 120.0
+    # Generous on purpose: the first silent gap covers model load + CPU prompt
+    # evaluation, measured at 220s+ on a memory-pressured laptop.
+    assert timeout.read == 600.0
+
+
+def test_stream_chat_requests_a_long_keep_alive() -> None:
+    # Without keep_alive, Ollama unloads the model after 5m idle and every
+    # question pays the multi-GB weight reload before its first token.
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=b'{"done":true}\n')
+
+    list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+    assert captured["body"]["keep_alive"] == "30m"
 
 
 def test_stream_chat_raises_runtime_error_when_ollama_unreachable() -> None:
@@ -123,6 +139,17 @@ def test_stream_chat_raises_runtime_error_when_ollama_unreachable() -> None:
         raise httpx.ConnectError("refused")
 
     with pytest.raises(RuntimeError, match="ollama.test"):
+        list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
+
+
+def test_stream_chat_reports_timeout_as_timeout_not_unreachable() -> None:
+    # A ReadTimeout means Ollama accepted the request but is still evaluating
+    # the prompt — telling the user it is "unreachable" sends them chasing a
+    # server that is up (the bug behind the desktop's misleading error box).
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timeout")
+
+    with pytest.raises(RuntimeError, match="timed out"):
         list(stream_chat(make_client(handler), "http://ollama.test", "qwen3:4b", []))
 
 

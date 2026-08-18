@@ -204,6 +204,51 @@ describe("MessageList", () => {
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
   });
 
+  it("renders the interrupted note (not an empty bubble) for a loaded conversation's empty stopped assistant row", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            { role: "assistant", text: "", citations: [], error: null, stopped: true },
+          ]}
+          streaming={false}
+          searching={false}
+          thinking=""
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(
+      screen.getByText("Answer interrupted — send your question again."),
+    ).toBeInTheDocument();
+    // No duplicate "stopped" caption underneath — the note already conveys it.
+    expect(screen.queryByText("stopped")).not.toBeInTheDocument();
+  });
+
+  it("renders a normal (non-empty, non-stopped) answer unchanged", () => {
+    render(
+      <HeroUIProvider>
+        <MessageList
+          messages={[
+            { role: "assistant", text: "Ein Monat.", citations: [], error: null },
+          ]}
+          streaming={false}
+          searching={false}
+          thinking=""
+          selectedIndex={null}
+          onSelect={vi.fn()}
+        />
+      </HeroUIProvider>,
+    );
+
+    expect(screen.getByText("Ein Monat.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Answer interrupted — send your question again."),
+    ).not.toBeInTheDocument();
+  });
+
   it("selects an assistant bubble on click and marks it pressed", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -298,6 +343,168 @@ describe("MessageList", () => {
       const bubble = disclosureToggle.parentElement?.parentElement;
       expect(bubble).not.toHaveAttribute("role");
       expect(bubble).not.toHaveAttribute("tabindex");
+    });
+  });
+
+  describe("scroll to newest message", () => {
+    it("jumps (not smoothly) to the bottom on mount and whenever the conversation id changes", () => {
+      const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+      const messages: import("../hooks/useChat").ChatMessage[] = [
+        { role: "user", text: "q", citations: [], error: null },
+        { role: "assistant", text: "a", citations: [], error: null },
+      ];
+      const { rerender } = render(
+        <HeroUIProvider>
+          <MessageList
+            messages={messages}
+            streaming={false}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+            onDeselect={vi.fn()}
+            conversationId="conv-1"
+          />
+        </HeroUIProvider>,
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenLastCalledWith(
+        expect.objectContaining({ behavior: "auto" }),
+      );
+
+      rerender(
+        <HeroUIProvider>
+          <MessageList
+            messages={messages}
+            streaming={false}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+            onDeselect={vi.fn()}
+            conversationId="conv-2"
+          />
+        </HeroUIProvider>,
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not re-scroll when new tokens stream in without the conversation id changing", () => {
+      const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+      const { rerender } = render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "Ein", citations: [], error: null }]}
+            streaming={true}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+            onDeselect={vi.fn()}
+            conversationId="conv-1"
+          />
+        </HeroUIProvider>,
+      );
+      scrollIntoView.mockClear();
+
+      rerender(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "Ein Monat", citations: [], error: null }]}
+            streaming={true}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={vi.fn()}
+            onDeselect={vi.fn()}
+            conversationId="conv-1"
+          />
+        </HeroUIProvider>,
+      );
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("deselect on outside click", () => {
+    it("clears the selection when clicking empty space in the chat area", async () => {
+      const user = userEvent.setup();
+      const onDeselect = vi.fn();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "Antwort.", citations: [], error: null }]}
+            streaming={false}
+            searching={false}
+            thinking=""
+            selectedIndex={0}
+            onSelect={vi.fn()}
+            onDeselect={onDeselect}
+            conversationId={null}
+          />
+        </HeroUIProvider>,
+      );
+
+      await user.click(screen.getByTestId("message-list"));
+
+      expect(onDeselect).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not deselect when clicking a message bubble", async () => {
+      const user = userEvent.setup();
+      const onSelect = vi.fn();
+      const onDeselect = vi.fn();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[{ role: "assistant", text: "Antwort.", citations: [], error: null }]}
+            streaming={false}
+            searching={false}
+            thinking=""
+            selectedIndex={null}
+            onSelect={onSelect}
+            onDeselect={onDeselect}
+            conversationId={null}
+          />
+        </HeroUIProvider>,
+      );
+
+      await user.click(screen.getByText("Antwort."));
+
+      expect(onSelect).toHaveBeenCalledWith(0);
+      expect(onDeselect).not.toHaveBeenCalled();
+    });
+
+    it("does not deselect when clicking a citation chip", async () => {
+      const user = userEvent.setup();
+      const onDeselect = vi.fn();
+      render(
+        <HeroUIProvider>
+          <MessageList
+            messages={[
+              {
+                role: "assistant",
+                text: "See [SR 220 Art. 335c].",
+                citations: [RESOLVED],
+                error: null,
+              },
+            ]}
+            streaming={false}
+            searching={false}
+            thinking=""
+            selectedIndex={0}
+            onSelect={vi.fn()}
+            onDeselect={onDeselect}
+            conversationId={null}
+          />
+        </HeroUIProvider>,
+      );
+
+      await user.click(screen.getByRole("button", { name: "SR 220 Art. 335c" }));
+
+      expect(onDeselect).not.toHaveBeenCalled();
     });
   });
 

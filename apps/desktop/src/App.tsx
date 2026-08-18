@@ -30,6 +30,27 @@ export default function App() {
   const online = useHealth();
   const { lang } = useLang();
   const { theme, setTheme } = useTheme();
+  const ingest = useIngest();
+  const conversations = useConversations();
+  // Surfaces failures from conversation mutations that bypass useChat's own
+  // banner (rename/delete, and the sidebar-list refresh triggered on
+  // conversation creation — a mutation useChat makes outside
+  // useConversations' own tracking) — kept separate from useChat's banner so
+  // a hiccup here never overwrites a legitimate streaming error still on
+  // screen.
+  const [convError, setConvError] = useState<string | null>(null);
+  const handleConvError = useCallback((error: unknown) => {
+    setConvError(error instanceof Error ? error.message : String(error));
+  }, []);
+  // useChat owns conversation persistence directly (see its module doc), so
+  // the sidebar's separate conversation list only learns about a new row by
+  // re-reading it — fired the moment the row is INSERTED (not when the
+  // whole turn, streaming included, finishes), so a brand-new conversation
+  // appears in the sidebar immediately instead of only once its first
+  // answer completes.
+  const handleConversationCreated = useCallback(() => {
+    conversations.refresh().catch(handleConvError);
+  }, [conversations, handleConvError]);
   const {
     messages,
     sources,
@@ -37,25 +58,17 @@ export default function App() {
     streaming,
     banner,
     conversationId,
+    generatingId,
+    unreadOutcomes,
     send,
     stop,
     reset,
     loadConversation,
-  } = useChat();
-  const ingest = useIngest();
-  const conversations = useConversations();
+    notifyDeleted,
+  } = useChat(handleConversationCreated);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panels, setPanels] = useState<Panels>(() => prefs.get("panels", DEFAULT_PANELS));
   const [activeId, setActiveId] = useState<string | null>(null);
-  // Surfaces failures from conversation mutations that bypass useChat's own
-  // banner (rename/delete, and the sidebar-list refresh triggered after
-  // send() — a mutation useChat makes outside useConversations' own
-  // tracking) — kept separate from useChat's banner so a hiccup here never
-  // overwrites a legitimate streaming error still on screen.
-  const [convError, setConvError] = useState<string | null>(null);
-  const handleConvError = useCallback((error: unknown) => {
-    setConvError(error instanceof Error ? error.message : String(error));
-  }, []);
   const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
@@ -222,13 +235,22 @@ export default function App() {
           onToggle={toggleLeft}
           conversations={conversations.conversations}
           activeId={activeId}
+          generatingId={generatingId}
+          unreadOutcomes={unreadOutcomes}
           onNew={handleNew}
           onResume={handleResume}
           onRename={(id, title) => {
             conversations.rename(id, title).catch(handleConvError);
           }}
           onDelete={(id) => {
-            conversations.remove(id).catch(handleConvError);
+            // notifyDeleted() only runs after a successful delete: resets
+            // the view if this was the open conversation, and aborts+blocks
+            // persistence if it was the one generating in the background
+            // (see useChat's notifyDeleted doc).
+            conversations
+              .remove(id)
+              .then(() => notifyDeleted(id))
+              .catch(handleConvError);
           }}
         />
         <main className="flex min-h-0 flex-1 flex-col">
@@ -239,10 +261,16 @@ export default function App() {
             thinking={thinking}
             selectedIndex={selectedIndex}
             onSelect={(i) => setSelectedIndex((prev) => (prev === i ? null : i))}
+            onDeselect={() => setSelectedIndex(null)}
             onOpenCitation={handleOpenCitation}
+            conversationId={conversationId}
           />
           <Composer
-            disabled={streaming || !online}
+            // Blocked while ANY conversation is generating (the global
+            // one-at-a-time rule), not just the visible one — sending from
+            // elsewhere stays blocked even though `streaming` (which
+            // toggles the Stop button) is scoped to the visible turn.
+            disabled={generatingId !== null || !online}
             offline={!online}
             streaming={streaming}
             focusSignal={composerFocusSignal}
@@ -250,11 +278,17 @@ export default function App() {
               setSelectedIndex(null);
               setConvError(null);
               // send() persists via lib/db directly (see useChat), bypassing
-              // useConversations' own refresh — re-read the list afterward so
-              // the sidebar shows the new/updated conversation. useChat folds
-              // its own failures (including a failed partial-answer save)
-              // into its own banner and never rejects, but this `.catch` is
-              // kept as a backstop against an unhandled rejection either way.
+              // useConversations' own refresh. A brand-new row already
+              // triggers a refresh the moment it's inserted (see
+              // handleConversationCreated above); this second refresh after
+              // the whole turn finishes re-sorts the sidebar by the
+              // conversation's final updated_at (bumped again when the
+              // assistant reply is appended) so it reflects the latest
+              // activity, for both new and resumed conversations. useChat
+              // folds its own failures (including a failed partial-answer
+              // save) into its own banner and never rejects, but this
+              // `.catch` is kept as a backstop against an unhandled
+              // rejection either way.
               void send(question)
                 .then(() => conversations.refresh().catch(handleConvError))
                 .catch(handleConvError);

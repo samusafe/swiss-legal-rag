@@ -300,6 +300,23 @@ subprocess of `apps/ingestion`'s venv, one run at a time.
 Set `INGESTION_PYTHON` in `.env` if the ingestion venv lives outside the default
 `apps/ingestion/.venv` layout.
 
+## Performance
+
+Everything runs on CPU, so the dominant cost of `/chat` is the language model
+evaluating the prompt before the first token streams (minutes on a busy laptop,
+not a failure). Three mitigations are built in:
+
+- **Model keep-alive** — chat and embedding requests ask Ollama to keep the
+  model resident for 30 minutes (`keep_alive`), so only the first question
+  after a cold start pays the multi-GB weight load.
+- **Search cache** — `/search` and the retrieval phase of `/chat` cache results
+  in-process (LRU, keyed by question/k/lang/canton). A repeated question skips
+  embedding and reranking entirely. The cache is cleared when an ingest run
+  starts, since the corpus is about to change.
+- **Generous first-token timeout** — the stream allows up to 10 minutes of
+  silence before declaring a timeout, and a timeout is reported as a timeout
+  ("still evaluating the prompt"), distinct from Ollama being unreachable.
+
 ## Tests
 
 ```

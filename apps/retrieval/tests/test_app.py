@@ -35,6 +35,41 @@ def test_search_rejects_unsupported_lang() -> None:
     assert response.status_code == 422
 
 
+def _counting_deps(embed_calls: list[str]) -> SearchDeps:
+    base = deps_with([])
+    return SearchDeps(
+        embed=lambda q: (embed_calls.append(q), base.embed(q))[1],
+        dense=base.dense,
+        fts=base.fts,
+        rerank=base.rerank,
+    )
+
+
+def test_search_serves_repeated_query_from_cache() -> None:
+    embed_calls: list[str] = []
+    with _client(_counting_deps(embed_calls)) as client:
+        first = client.post("/search", json={"q": "frage", "lang": "de"})
+        second = client.post("/search", json={"q": "frage", "lang": "de"})
+        other = client.post("/search", json={"q": "andere frage", "lang": "de"})
+
+    assert first.json() == second.json()
+    assert other.status_code == 200
+    # The repeat hit the cache; only the two distinct questions ran the pipeline.
+    assert embed_calls == ["frage", "andere frage"]
+
+
+def test_ingest_start_clears_the_search_cache(monkeypatch) -> None:
+    monkeypatch.setattr("retrieval.app.start_ingest", lambda state, python: True)
+    embed_calls: list[str] = []
+    with _client(_counting_deps(embed_calls)) as client:
+        client.post("/search", json={"q": "frage", "lang": "de"})
+        assert client.post("/ingest").status_code == 202
+        client.post("/search", json={"q": "frage", "lang": "de"})
+
+    # The corpus changed under the cache — the second search must re-run.
+    assert embed_calls == ["frage", "frage"]
+
+
 def test_health_returns_ok() -> None:
     with _client(deps_with([])) as client:
         response = client.get("/health")
@@ -230,6 +265,7 @@ def test_chat_streams_sources_tokens_done(monkeypatch) -> None:
     ]
     assert done["model"] == app.state.settings.chat_model
     assert isinstance(done["duration_ms"], int)
+    assert done["refusal"] is False
 
 
 def test_chat_streams_thinking_events_before_tokens(monkeypatch) -> None:
@@ -350,6 +386,7 @@ def test_chat_refuses_without_calling_ollama_when_no_sources_retrieved(monkeypat
     assert done["citations"] == []
     assert done["model"] == app.state.settings.chat_model
     assert isinstance(done["duration_ms"], int)
+    assert done["refusal"] is True
 
 
 def test_chat_returns_503_when_retrieval_fails() -> None:

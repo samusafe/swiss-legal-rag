@@ -149,4 +149,24 @@ describe("i18n", () => {
       expect(t("settings.jurisdictionHint")).toBe(expected[lang].hint);
     });
   });
+
+  describe("chat.interrupted key", () => {
+    const expected = {
+      en: "Answer interrupted — send your question again.",
+      de: "Antwort unterbrochen — stelle deine Frage erneut.",
+      fr: "Réponse interrompue — renvoyez votre question.",
+      it: "Risposta interrotta — invia di nuovo la domanda.",
+      pt: "Resposta interrompida — envia a pergunta de novo.",
+    } as const;
+    const langs = ["en", "de", "fr", "it", "pt"] as const;
+
+    it.each(langs)("resolves chat.interrupted in %s", (lang) => {
+      const { result } = renderHook(() => useLang());
+      act(() => {
+        result.current.setLang(lang);
+      });
+
+      expect(t("chat.interrupted")).toBe(expected[lang]);
+    });
+  });
 });

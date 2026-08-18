@@ -116,6 +116,88 @@ def test_parse_lexwork_null_text_of_law_fails_loud_not_attributeerror(
         parse_lexwork(path, entry())
 
 
+def test_parse_strips_trailing_asterisk_marker_from_number_sibling(
+    tmp_path: Path,
+) -> None:
+    # BE (BSG) marks amended articles with a trailing "*". Variant: the asterisk
+    # sits in a <strong> sibling next to (not inside) the number span.
+    xhtml = (
+        "<div class='document'>"
+        "<div class='article'>"
+        "<div class='article_number'><span class='article_symbol'>Art.</span> "
+        "<span class='number'>32a</span> <strong>*</strong></div>"
+        "<div class='article_title'>"
+        "<span class='title_text'>Geltung der Baubewilligung <strong>*</strong></span>"
+        "</div>"
+        "</div>"
+        "<div class='paragraph'><span class='number'>1</span>"
+        "<p><span class='text_content'>Text.</span></p></div>"
+        "</div>"
+    )
+    payload = {"text_of_law": {"selected_version": {"xhtml_tol": xhtml}}}
+    path = tmp_path / "be_sibling.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    chunk = parse_lexwork(path, entry())[0]
+    assert chunk.article == "32a"
+    assert chunk.eid == "art_32a"
+    assert chunk.heading == "Geltung der Baubewilligung"
+
+
+def test_parse_strips_trailing_asterisk_marker_inside_number_span(
+    tmp_path: Path,
+) -> None:
+    # Real BSG (721.0) markup: the asterisk is nested *inside* the number span
+    # itself, e.g. "<span class='number'>32a&nbsp;<strong>*</strong></span>",
+    # which `_text()` renders as "32a *" before sanitization.
+    xhtml = (
+        "<div class='document'>"
+        "<div class='article'>"
+        "<div class='article_number'><span class='article_symbol'>Art.</span> "
+        "<span class='number'>32a <strong>*</strong></span></div>"
+        "<div class='article_title'>"
+        "<span class='title_text'>4.2 Schutz und Erhaltung <strong>*</strong></span>"
+        "</div>"
+        "</div>"
+        "<div class='paragraph'><span class='number'>1</span>"
+        "<p><span class='text_content'>Text.</span></p></div>"
+        "</div>"
+    )
+    payload = {"text_of_law": {"selected_version": {"xhtml_tol": xhtml}}}
+    path = tmp_path / "be_nested.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    chunk = parse_lexwork(path, entry())[0]
+    assert chunk.article == "32a"
+    assert chunk.eid == "art_32a"
+    assert chunk.heading == "4.2 Schutz und Erhaltung"
+    assert "*" not in chunk.article
+    assert "*" not in chunk.eid
+    assert (chunk.heading or "").strip()[-1] != "*"
+
+
+def test_parse_strips_trailing_asterisk_marker_from_breadcrumb(
+    tmp_path: Path,
+) -> None:
+    xhtml = (
+        "<div class='document'>"
+        "<div class='title level_1'><span class='title_text'>1 Allgemeines <strong>*</strong></span></div>"
+        "<div class='article'>"
+        "<div class='article_number'><span class='article_symbol'>Art.</span> "
+        "<span class='number'>1</span></div>"
+        "</div>"
+        "<div class='paragraph'><span class='number'>1</span>"
+        "<p><span class='text_content'>Text.</span></p></div>"
+        "</div>"
+    )
+    payload = {"text_of_law": {"selected_version": {"xhtml_tol": xhtml}}}
+    path = tmp_path / "be_breadcrumb.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    chunk = parse_lexwork(path, entry())[0]
+    assert chunk.context == "1 Allgemeines"
+
+
 def test_version_date_stand_german() -> None:
     assert version_date_from("vom 21.04.2009 (Stand 01.01.2026)", None) == date(2026, 1, 1)
 

@@ -3,7 +3,12 @@ import httpx
 
 def embed_query(client: httpx.Client, base_url: str, model: str, text: str) -> list[float]:
     try:
-        response = client.post(f"{base_url}/api/embed", json={"model": model, "input": [text]})
+        # keep_alive: keep the embedding model resident between searches
+        # (Ollama default 5m) — reloading it adds seconds to every query.
+        response = client.post(
+            f"{base_url}/api/embed",
+            json={"model": model, "input": [text], "keep_alive": "30m"},
+        )
     except httpx.HTTPError as error:
         raise RuntimeError(
             f"Ollama unreachable at {base_url} — is `ollama serve` running and "

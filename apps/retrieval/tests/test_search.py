@@ -1,7 +1,7 @@
 from datetime import date
 
 from retrieval.db import ChunkRow
-from retrieval.search import SearchDeps, run_search
+from retrieval.search import SearchDeps, fts_query, run_search
 
 
 def row(id_: int, text: str) -> ChunkRow:
@@ -25,6 +25,31 @@ def deps_with(fts_langs: list[str]) -> SearchDeps:
         fts=lambda q, lang, k, jur: (fts_langs.append(lang), [B, C])[1],
         rerank=lambda q, texts: [SCORES[t] for t in texts],
     )
+
+
+def test_fts_query_ors_terms_and_drops_short_words() -> None:
+    # websearch_to_tsquery ANDs plain terms, so one out-of-corpus word
+    # ("Gartenhaus") would empty the whole FTS arm without the OR rewrite.
+    q = "Brauche ich eine Baubewilligung für ein Gartenhaus im Kanton Bern?"
+    assert fts_query(q) == (
+        "Brauche or ich or eine or Baubewilligung or für or ein or Gartenhaus or Kanton or Bern"
+    )
+
+
+def test_fts_query_leaves_an_all_short_query_unchanged() -> None:
+    assert fts_query("OR 12") == "OR 12"
+
+
+def test_run_search_passes_the_or_rewritten_query_to_fts() -> None:
+    seen: list[str] = []
+    deps = SearchDeps(
+        embed=lambda q: [0.0] * 1024,
+        dense=lambda vector, k, jur: [A],
+        fts=lambda q, lang, k, jur: (seen.append(q), [B])[1],
+        rerank=lambda q, texts: [SCORES[t] for t in texts],
+    )
+    run_search(deps, "Baubewilligung für Gartenhaus", 5, "de")
+    assert seen == ["Baubewilligung or für or Gartenhaus"]
 
 
 def test_run_search_orders_by_rerank_score() -> None:

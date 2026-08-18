@@ -11,11 +11,13 @@
 // contain), must_refuse (bool; true rows use empty expected_sources /
 // expected_keywords and need no source verification).
 //
-// This file is federal-only for now. Cantonal rows (SG/sGS, BE/BSG) are
-// deferred until the first real SG/BE ingest lands, so each row's source
-// article can be drafted against real indexed chunks (`python -m
-// evals.draft`) instead of a guessed placeholder -- see corpus.yaml and
-// docs/swiss-legal-rag.md for the cantonal pilot plan.
+// Federal rows above; cantonal rows below (SG/sGS, BE/BSG), added after the
+// first real SG/BE ingest landed. Each cantonal row's source article was
+// checked against the real indexed chunks in data/chunks/SG and
+// data/chunks/BE (see corpus.yaml and docs/swiss-legal-rag.md for the
+// cantonal pilot plan). Two rows (seed-sg-05, seed-be-05) cite a federal
+// source alongside the cantonal one where the two genuinely co-govern
+// (municipal autonomy, cantonal sovereignty).
 {"id": "seed-de-01", "lang": "de", "question": "Wie lange ist die ordentliche Kündigungsfrist im ersten Dienstjahr nach Ablauf der Probezeit?", "expected_sources": ["SR 220 Art. 335c"], "expected_keywords": ["einen Monat", "Kündigungsfrist"], "must_refuse": false}
 {"id": "seed-de-02", "lang": "de", "question": "Ab welchem Alter gilt eine Person in der Schweiz als volljährig?", "expected_sources": ["SR 210 Art. 14"], "expected_keywords": ["18", "volljährig"], "must_refuse": false}
 {"id": "seed-de-03", "lang": "de", "question": "Wie hoch ist der Steuersatz der Kantonssteuer im Kanton Zürich für ein Einkommen über 100'000 Franken?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
@@ -49,3 +51,13 @@
 {"id": "expanded-it-06", "lang": "it", "question": "Qual è la durata massima della settimana lavorativa secondo la legge sul lavoro?", "expected_sources": ["SR 822.11 Art. 9"], "expected_keywords": ["45 ore", "50 ore"], "must_refuse": false}
 {"id": "expanded-it-07", "lang": "it", "question": "Quale autorizzazione edilizia serve per costruire un ampliamento privato nel Cantone Ticino?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
 {"id": "expanded-it-08", "lang": "it", "question": "Quale medicinale e quale dose devo assumere per curare l'influenza?", "expected_sources": [], "expected_keywords": [], "must_refuse": true}
+{"id": "seed-sg-01", "lang": "de", "question": "Wie weit reicht die Steuerpflicht bei persönlicher Zugehörigkeit im Kanton St. Gallen?", "expected_sources": ["sGS 811.1 Art. 15"], "expected_keywords": ["unbeschränkt", "persönlicher Zugehörigkeit"], "must_refuse": false}
+{"id": "seed-sg-02", "lang": "de", "question": "Unter welcher Voraussetzung wird im Kanton St. Gallen eine Baubewilligung erteilt?", "expected_sources": ["sGS 731.1 Art. 146"], "expected_keywords": ["Baubewilligung", "öffentlichen Recht begründeten Hindernisse"], "must_refuse": false}
+{"id": "seed-sg-03", "lang": "de", "question": "Ab welchem Alter wird ein Kind im Kanton St. Gallen schulpflichtig?", "expected_sources": ["sGS 213.1 Art. 45"], "expected_keywords": ["schulpflichtig", "vierten Altersjahres"], "must_refuse": false}
+{"id": "seed-sg-04", "lang": "de", "question": "Welchen Zweck verfolgt die persönliche Sozialhilfe im Kanton St. Gallen?", "expected_sources": ["sGS 381.1 Art. 2"], "expected_keywords": ["Hilfebedürftigkeit", "Eigenverantwortung"], "must_refuse": false}
+{"id": "seed-sg-05", "lang": "de", "question": "Was regelt das st. gallische Gemeindegesetz zur Organisation der Gemeinden, und wie schützt die Bundesverfassung die Gemeindeautonomie?", "expected_sources": ["sGS 151.2 Art. 1", "SR 101 Art. 50"], "expected_keywords": ["Grundzüge der Organisation", "Gemeindeautonomie"], "must_refuse": false}
+{"id": "seed-be-01", "lang": "fr", "question": "Quels projets de construction sont soumis à l'octroi d'un permis de construire dans le canton de Berne ?", "expected_sources": ["BSG 721.0 Art. 1a"], "expected_keywords": ["permis de construire", "fixés au sol"], "must_refuse": false}
+{"id": "seed-be-02", "lang": "de", "question": "Wie weit reicht die Steuerpflicht bei persönlicher Zugehörigkeit im Kanton Bern?", "expected_sources": ["BSG 661.11 Art. 7"], "expected_keywords": ["unbeschränkt", "wirtschaftlicher Zugehörigkeit"], "must_refuse": false}
+{"id": "seed-be-03", "lang": "de", "question": "Welche Aufgaben hat die Volksschule im Kanton Bern gegenüber den Familien?", "expected_sources": ["BSG 432.210 Art. 2"], "expected_keywords": ["unterstützt die Familie", "harmonischen Entwicklung"], "must_refuse": false}
+{"id": "seed-be-04", "lang": "de", "question": "Welchen Zweck verfolgt die Sozialhilfe nach dem bernischen Sozialhilfegesetz?", "expected_sources": ["BSG 860.1 Art. 1"], "expected_keywords": ["menschenwürdigen", "eigenverantwortlichen Lebens"], "must_refuse": false}
+{"id": "seed-be-05", "lang": "de", "question": "Wie beschreibt die Verfassung des Kantons Bern das Verhältnis zum Bund, und was besagt die Bundesverfassung zur kantonalen Souveränität?", "expected_sources": ["BSG 101.1 Art. 2", "SR 101 Art. 3"], "expected_keywords": ["Stand der Schweizerischen Eidgenossenschaft", "souverän"], "must_refuse": false}

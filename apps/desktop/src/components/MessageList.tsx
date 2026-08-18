@@ -1,7 +1,8 @@
 import { motion } from "framer-motion";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { ChatMessage } from "../hooks/useChat";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { t } from "../i18n";
 import type { Citation } from "../lib/api";
 import { SHOW_THINKING } from "../lib/api";
 import { splitCitations } from "../lib/citations";
@@ -93,7 +94,9 @@ export function MessageList({
   thinking,
   selectedIndex,
   onSelect,
+  onDeselect,
   onOpenCitation,
+  conversationId = null,
   showThinking = SHOW_THINKING,
 }: {
   messages: ChatMessage[];
@@ -102,7 +105,15 @@ export function MessageList({
   thinking: string;
   selectedIndex: number | null;
   onSelect: (index: number) => void;
+  // Clears the selection on a click that hits empty chat-area space — a
+  // message bubble's own onClick (below) selects instead, and citation
+  // chips/buttons stop propagation, so this never fires for those.
+  onDeselect?: () => void;
   onOpenCitation?: (citation: Citation, message: ChatMessage) => void;
+  // Identifies the open conversation so the list can jump to its newest
+  // message on open/switch (see the scroll effect below) without also
+  // firing on every token appended while streaming.
+  conversationId?: string | null;
   // Defaults to the build-time VITE_SHOW_THINKING flag; overridable so tests
   // can exercise both states without stubbing import.meta.env.
   showThinking?: boolean;
@@ -114,8 +125,32 @@ export function MessageList({
     transition: { duration: reducedMotion ? 0 : ENTRY_DURATION_S },
   };
 
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Opening a conversation (mount) or switching to a different one must land
+  // on its newest message, not wherever the previous conversation happened
+  // to leave the scroll position — and must jump there instantly (no smooth
+  // animation, which would be nauseating on a long thread). Keyed on
+  // conversationId only, not `messages`, so this never fires while tokens
+  // stream into the current conversation.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+  }, [conversationId]);
+
+  const handleBackgroundClick = (event: MouseEvent<HTMLDivElement>): void => {
+    // Only a click that lands on the container itself (empty chat-area
+    // space) deselects — a click on a message bubble, citation chip, or
+    // other control is a click on a descendant element, so target !==
+    // currentTarget there and this is a no-op.
+    if (event.target === event.currentTarget) onDeselect?.();
+  };
+
   return (
-    <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+    <div
+      data-testid="message-list"
+      onClick={handleBackgroundClick}
+      className="flex flex-1 flex-col gap-3 overflow-y-auto p-4"
+    >
       {/* Transcript is append-only, so index keys are stable. */}
       {messages.map((message, i) => {
         if (message.role === "user") {
@@ -166,6 +201,14 @@ export function MessageList({
                 thinking={thinking}
                 expandable={showThinking}
               />
+            ) : message.stopped === true && message.text.trim() === "" ? (
+              // A stopped/interrupted turn that never produced any text (a
+              // live Stop before the first token, or — most commonly — a
+              // conversation reloaded from storage whose assistant row was
+              // left empty because the app died mid-generation): show a note
+              // instead of a blank bubble, rather than the citation split
+              // below rendering nothing at all.
+              <span className="italic text-foreground-400">{t("chat.interrupted")}</span>
             ) : (
               splitCitations(message.text, message.citations).map((segment, j) =>
                 segment.kind === "text" ? (
@@ -188,12 +231,16 @@ export function MessageList({
             {message.error !== null && (
               <p className="mt-2 text-sm text-danger">{message.error}</p>
             )}
-            {message.stopped === true && (
+            {message.stopped === true && message.text.trim() !== "" && (
               <p className="mt-1 text-xs text-foreground-400">stopped</p>
             )}
           </motion.div>
         );
       })}
+      {/* Scroll target for the effect above; pointer-events-none so a click
+          in the space below the last message still lands on the container
+          itself (and deselects) rather than on this sentinel. */}
+      <div ref={bottomRef} aria-hidden="true" className="pointer-events-none h-0" />
     </div>
   );
 }

@@ -22,3 +22,8 @@ function matchMediaStub(query: string): MediaQueryList {
   } as unknown as MediaQueryList;
 }
 window.matchMedia ??= matchMediaStub;
+
+// jsdom has no scrollIntoView; MessageList calls it to jump to the newest
+// message on conversation open/switch. A no-op stub is enough for tests that
+// don't care about scrolling — tests that do spy on it explicitly.
+Element.prototype.scrollIntoView ??= () => {};

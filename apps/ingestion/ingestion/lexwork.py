@@ -21,6 +21,18 @@ _STAND_RE = re.compile(r"(?:Stand|état(?:\s+au)?)\s+(\d{2})\.(\d{2})\.(\d{4})",
 # via the cache filename or injecting a path into the API URL (M2).
 _ACT_NUMBER_RE = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
+# BE's (BSG) LexWork markup flags amended articles/headings with a trailing "*"
+# (e.g. "<span class='number'>32a&nbsp;<strong>*</strong></span>" rendering as
+# "32a *" once `_text()` joins and strips its itertext nodes). Strip that marker
+# — and any run of it plus surrounding whitespace — from the very end of a
+# string only; asterisks elsewhere in body text are legitimate content and
+# must be left alone.
+_TRAILING_ASTERISK_RE = re.compile(r"(?:\s*\*+)+\s*$")
+
+
+def _strip_marker(text: str) -> str:
+    return _TRAILING_ASTERISK_RE.sub("", text).strip()
+
 
 def version_date_from(enactment_text: str, enactment_iso: str | None) -> date:
     m = _STAND_RE.search(enactment_text)
@@ -211,7 +223,7 @@ def parse_lexwork(json_path: Path, entry: ManifestEntry) -> list[Chunk]:
             level = int(cls.rsplit("_", 1)[1])
             del breadcrumb[level - 1:]
             title_text = el.find_class("title_text")
-            breadcrumb.append(_text(title_text[0]) if title_text else _text(el))
+            breadcrumb.append(_strip_marker(_text(title_text[0]) if title_text else _text(el)))
         elif cls == "article":
             flush()
             number_spans = el.find_class("number")
@@ -220,9 +232,9 @@ def parse_lexwork(json_path: Path, entry: ManifestEntry) -> list[Chunk]:
                     f"{entry.jurisdiction} {entry.number}/{entry.lang}: "
                     "article div has no 'number' span"
                 )
-            current_no = _text(number_spans[0])
+            current_no = _strip_marker(_text(number_spans[0]))
             titles = el.find_class("title_text")
-            current_heading = _text(titles[0]) if titles else None
+            current_heading = _strip_marker(_text(titles[0])) if titles else None
         elif current_no is not None and cls in {"paragraph", "enumeration_item"}:
             # Partially-abrogated paragraphs (e.g. "3 …*") carry a span.abrogation_ellip
             # marker for their repealed content; drop them instead of leaking the

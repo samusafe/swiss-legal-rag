@@ -5,7 +5,7 @@ description = "Hybrid search + RAG API over Swiss federal law (FastAPI)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn==0.52.1",
+    "uvicorn==0.52.4",
     "httpx==0.28.1",
     "pydantic==2.13.4",
     "psycopg[binary]==3.3.4",

@@ -5,7 +5,7 @@ description = "Gold-dataset evaluation harness for the Swiss Legal RAG retrieval
 requires-python = ">=3.12"
 dependencies = [
     "httpx==0.28.1",
-    "python-dotenv==1.2.2",
+    "python-dotenv==1.2.3",
 ]
 
 [project.optional-dependencies]
